@@ -28,3 +28,24 @@ python -m unittest tests.test_gigachat_live -v
 данные и не сохраняет секрет в журнале.
 
 Подробности контракта: [документация интеграции](docs/integrations/GIGACHAT.md).
+
+## Запуск на Raspberry Pi 5
+
+RP5 — единственная целевая среда выполнения проекта. После клонирования
+репозитория на Pi подготовьте окружение и выполните тесты:
+
+```bash
+git clone https://github.com/pypsycoder/neurolab.git
+cd neurolab
+./scripts/bootstrap_rp5.sh
+```
+
+Ключ остаётся только в локальном `.env` на Pi. Для намеренно запущенной живой
+проверки передайте путь к этому файлу, не копируя его в Git:
+
+```bash
+NEUROLAB_ENV_FILE=/путь/к/.env ./scripts/verify_gigachat_live.sh
+```
+
+Скрипт запрашивает только список доступных моделей и не передаёт данные
+пациентов. Не добавляйте `.env`, сертификаты, логи и папку `sources/` в Git.
