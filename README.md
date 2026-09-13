@@ -1,51 +1,85 @@
-# НейроЛаб
+# neuro-lab control plane
 
-Пока это **исследовательский контур**: только публичные и синтетические данные,
-без пациентов и без их персональных/медицинских данных. Условия закреплены в
-[ADR-0001](docs/adr/0001-research-mode-russia-synthetic-data.md).
+Воспроизводимый always-on control plane для Raspberry Pi 5. Compose project изолирован от существующего `sing-box` и не публикует PostgreSQL или Redis на хост.
 
-## Первая интеграция: GigaChat
+## Сервисы
 
-Каркас использует Python 3.11 и официальный пакет `gigachat`. В unit-тестах
-реальный API не вызывается. Живой тест намеренно выключен, пока владелец проекта
-не передаст ключ через локальное окружение.
+- PostgreSQL 17 хранит задачи, события и фактическое usage.
+- Redis держит очередь `neuro-lab:tasks`.
+- Два worker'а выполняют GigaChat chat и embeddings запросы.
+- Primary и Freemium credentials выбираются явно через `credential_lane`; автоматический переход на платный OpenRouter отсутствует.
+- Отдельный monitor сохраняет температуру и базовые метрики Pi раз в минуту; история ограничена 30 днями.
 
-```powershell
-python -m unittest discover -s tests -v
+## Payload для чата
+
+```json
+{
+  "provider": "gigachat",
+  "operation": "chat",
+  "credential_lane": "primary",
+  "model": "GigaChat-3-Pro",
+  "messages": [{"role": "user", "content": "Задача"}],
+  "temperature": 0.2,
+  "max_tokens": 512
+}
 ```
 
-Чтобы выполнить живую проверку после установки зависимостей, передайте ключ
-только через локальное окружение (не в чат и не в файл репозитория), затем
-явно включите тест:
+## Payload для эмбеддингов
 
-```powershell
-$env:GIGACHAT_CREDENTIALS = "<локальный-ключ>"
-$env:RUN_GIGACHAT_LIVE = "1"
-python -m unittest tests.test_gigachat_live -v
+```json
+{
+  "provider": "gigachat",
+  "operation": "embeddings",
+  "credential_lane": "primary",
+  "model": "GigaEmbeddings-3B-2025-09",
+  "input": ["первый текст", "второй текст"]
+}
 ```
 
-Живая проверка запрашивает только список моделей. Она не передаёт пациентские
-данные и не сохраняет секрет в журнале.
+## Проверка моделей
 
-Подробности контракта: [документация интеграции](docs/integrations/GIGACHAT.md).
-
-## Запуск на Raspberry Pi 5
-
-RP5 — единственная целевая среда выполнения проекта. После клонирования
-репозитория на Pi подготовьте окружение и выполните тесты:
+Из контейнера проекта можно поставить в очередь минимальный probe всех моделей первого ключа и получить компактный отчёт без вывода credentials и embedding vectors:
 
 ```bash
-git clone https://github.com/pypsycoder/neurolab.git
-cd neurolab
-./scripts/bootstrap_rp5.sh
+cd /opt/neuro-lab
+docker compose run --rm orchestrator python probe_models.py --lane primary
 ```
 
-Ключ остаётся только в локальном `.env` на Pi. Для намеренно запущенной живой
-проверки передайте путь к этому файлу, не копируя его в Git:
+Ограничить проверку одной моделью:
 
 ```bash
-NEUROLAB_ENV_FILE=/путь/к/.env ./scripts/verify_gigachat_live.sh
+docker compose run --rm orchestrator python probe_models.py \
+  --lane primary --model GigaChat-3-Ultra
 ```
 
-Скрипт запрашивает только список доступных моделей и не передаёт данные
-пациентов. Не добавляйте `.env`, сертификаты, логи и папку `sources/` в Git.
+## Запуск
+
+```bash
+cd /opt/neuro-lab
+docker compose config --quiet
+docker compose up -d
+docker compose ps
+```
+
+## Web-панель
+
+После запуска dashboard доступен только локально на Pi по `http://127.0.0.1:8080`. Для безопасного удалённого доступа через tailnet включить Tailscale Serve и создать HTTPS proxy:
+
+```bash
+tailscale serve --bg 8080
+tailscale serve status
+```
+
+Не использовать `tailscale funnel` для админ-панели: Funnel делает сервис доступным публично.
+
+После настройки панель доступна только пользователям tailnet по `<private Tailnet HTTPS URL>`. Отключить proxy можно командой:
+
+```bash
+sudo tailscale serve --https=443 off
+```
+
+В верхней части панели — график температуры Raspberry Pi. Переключатели `1 час`, `12 часов` и `сутки` меняют историческое окно. Остальные системные показатели сделаны компактными, а данные обновляются автоматически.
+
+## Веб-поиск
+
+GigaChat chat API сам по себе не получает доступ к интернету от этого control plane. Для задач с внешними источниками будет добавлен отдельный тип задания `web-research`: внешний поисковый провайдер вернёт URL и выдержки, а GigaChat получит их как контекст для итогового ответа. Такой маршрут должен включаться отдельно, с лимитами стоимости; OpenRouter остаётся выключенным, пока пользователь явно не разрешит его использование.

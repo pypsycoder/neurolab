@@ -1,0 +1,104 @@
+name: neuro-lab
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/010-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [control_plane]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [control_plane]
+
+  orchestrator:
+    build: ./orchestrator
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - /srv/neuro-lab/logs:/var/log/neuro-lab
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    networks: [control_plane]
+    deploy:
+      replicas: 2
+
+  dashboard:
+    build: ./dashboard
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      PANEL_REFRESH_SECONDS: 10
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /proc/loadavg:/host/proc/loadavg:ro
+      - /proc/meminfo:/host/proc/meminfo:ro
+      - /sys/class/thermal/thermal_zone0/temp:/host/sys/thermal_temp:ro
+      - /srv/neuro-lab:/srv/neuro-lab:ro
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    networks: [control_plane]
+
+  monitor:
+    build: ./monitor
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      METRICS_INTERVAL_SECONDS: 60
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /proc/loadavg:/host/proc/loadavg:ro
+      - /proc/meminfo:/host/proc/meminfo:ro
+      - /sys/class/thermal/thermal_zone0/temp:/host/sys/thermal_temp:ro
+      - /srv/neuro-lab:/srv/neuro-lab:ro
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    networks: [control_plane]
+
+networks:
+  control_plane:
+    name: neuro-lab-control-plane
+
+volumes:
+  postgres_data:
+    name: neuro-lab-postgres-data
+  redis_data:
+    name: neuro-lab-redis-data

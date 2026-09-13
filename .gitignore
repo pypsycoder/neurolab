@@ -25,3 +25,8 @@ reports/
 
 # Synced ChatGPT-project references are read-only and not part of the deployable codebase.
 sources/
+
+# RP5 local runtime and access notes
+inventory/
+runtime/
+docs/private/
