@@ -77,8 +77,32 @@ command. Результат всегда имеет решение `review_requi
 одноразового worktree. Повторный live OpenHands запуск требует отдельного
 ручного решения и не входит в автоматический smoke.
 
+## Повторяемый ручной synthetic runbook
+
+`scripts/run_openhands_manual_eval.sh` запускается только при явном
+`RUN_OPENHANDS_MANUAL_EVAL=1`. Он:
+
+- читает local `.env` только как данные, берёт лишь указанный GigaChat
+  credential и создаёт одноразовый proxy key;
+- создаёт новый synthetic Git-worktree с заведомо падающим тестом;
+- изолирует агента во внутренней Docker-сети: gpt2giga имеет отдельный
+  upstream-network, агент видит лишь proxy, Docker socket и основной checkout
+  не монтируются;
+- даёт CLI только synthetic workspace, read-only root filesystem, capabilities
+  dropped и tmpfs для HOME/cache/исполняемых временных библиотек PyInstaller;
+- требует успешный независимый test, diff строго одного allowlisted файла и
+  решение `review_required` от acceptance gate;
+- удаляет proxy, сети, одноразовый env и worktree при любом завершении.
+
+Фактический run 2026-09-14 прошёл: OpenHands исправил только
+`openhands_eval_fixture/calculator.py`, его unit-test и независимая проверка
+дали `1 passed`, а gate вернул `review_required`. Основной Compose-стек
+остался в шести running-сервисах. Локальный redacted trace хранится только под
+ignored `runtime/`; он не является артефактом для Git или клинического
+контура.
+
 ## Следующий безопасный шаг
 
-Построить approval-gated ручной запуск OpenHands поверх acceptance gate, только
-для synthetic worktree и без автоматического включения в smoke. Для
+Собрать deterministic architectural smoke этапа E поверх уже подтверждённых
+synthetic contracts. OpenHands-run остаётся ручным и approval-gated; для
 research-пути по-прежнему действует ADR-0003: нужен trace поиска.
