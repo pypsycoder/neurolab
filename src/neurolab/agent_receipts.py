@@ -70,6 +70,13 @@ def verify_transition_receipt(receipt: TransitionReceipt) -> None:
         raise AgentReceiptPolicyError("receipt terminal state does not match transitions")
 
 
+def require_completed_transition_receipt(receipt: TransitionReceipt) -> None:
+    """Fail closed unless the verified chain reaches its sole terminal state."""
+    verify_transition_receipt(receipt)
+    if receipt.state != "reported":
+        raise AgentReceiptPolicyError("receipt has not reached the terminal state")
+
+
 def append_transition(
     receipt: TransitionReceipt, transition: RoleTransition
 ) -> TransitionReceipt:

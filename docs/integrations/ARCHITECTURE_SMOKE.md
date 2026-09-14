@@ -13,7 +13,8 @@ LLM, OpenHands, Hermes, внешний поиск или рабочий репо
 3. `neurolab.agent_transitions`: default-deny state machine разрешает только
    пять заранее описанных forward-only hand-off между ролями.
 4. `neurolab.agent_receipts`: in-memory receipt подтверждает порядок
-   hand-off и детектирует изменение цепочки по digest.
+   hand-off и детектирует изменение цепочки по digest; незавершённая цепочка
+   fail-closed и не может породить итоговое решение.
 5. `neurolab.architecture_smoke`: минимальный orchestration receipt, который
    требует одновременно validated engineering workflow, role policy,
    transition policy, verified receipt, untrusted MCP trace и allowlisted
@@ -40,6 +41,7 @@ review_required: workflow:validated
   → roles:default-deny
   → transitions:forward-only
   → receipt:verified-chain
+  → receipt:complete
   → mcp-policy:accepted-untrusted-data
   → worktree-evidence:constrained
   → acceptance:review_required

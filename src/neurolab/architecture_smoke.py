@@ -13,6 +13,7 @@ from neurolab.agent_roles import require_allowed_action, required_role_actions
 from neurolab.agent_receipts import (
     append_transition,
     new_transition_receipt,
+    require_completed_transition_receipt,
     verify_transition_receipt,
 )
 from neurolab.agent_transitions import require_allowed_transition, required_transitions
@@ -64,6 +65,7 @@ def run_architecture_smoke(
         )
         transition_receipt = append_transition(transition_receipt, transition)
     verify_transition_receipt(transition_receipt)
+    require_completed_transition_receipt(transition_receipt)
 
     mcp_state: TraceState = run_synthetic_mcp_trace(
         task, thread_id=f"{thread_id}:mcp"
@@ -83,6 +85,7 @@ def run_architecture_smoke(
         "roles:default-deny",
         "transitions:forward-only",
         "receipt:verified-chain",
+        "receipt:complete",
         "mcp-policy:accepted-untrusted-data",
         "worktree-evidence:constrained",
         f"acceptance:{receipt.decision}",

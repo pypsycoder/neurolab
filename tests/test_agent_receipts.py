@@ -7,6 +7,7 @@ from neurolab.agent_receipts import (
     AgentReceiptPolicyError,
     append_transition,
     new_transition_receipt,
+    require_completed_transition_receipt,
     verify_transition_receipt,
 )
 from neurolab.agent_transitions import RoleTransition, required_transitions
@@ -19,6 +20,7 @@ class AgentReceiptPolicyTests(unittest.TestCase):
             receipt = append_transition(receipt, transition)
 
         verify_transition_receipt(receipt)
+        require_completed_transition_receipt(receipt)
         self.assertEqual(receipt.state, "reported")
         self.assertEqual(len(receipt.transitions), 5)
 
@@ -43,3 +45,12 @@ class AgentReceiptPolicyTests(unittest.TestCase):
         ):
             with self.assertRaises(AgentReceiptPolicyError):
                 verify_transition_receipt(altered)
+
+    def test_incomplete_receipt_cannot_be_finalized(self):
+        receipt = new_transition_receipt()
+        with self.assertRaises(AgentReceiptPolicyError):
+            require_completed_transition_receipt(receipt)
+
+        receipt = append_transition(receipt, tuple(required_transitions())[0])
+        with self.assertRaises(AgentReceiptPolicyError):
+            require_completed_transition_receipt(receipt)
