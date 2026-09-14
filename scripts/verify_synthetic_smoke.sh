@@ -17,6 +17,7 @@ PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON_BIN" -m unittest -q \
   tests.test_workflow \
   tests.test_mcp_policy \
   tests.test_mcp_stdio \
+  tests.test_engineering_policy \
   tests.test_synthetic_mcp_trace
 
 RUN_MCP_DOCKER_EVAL=1 PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON_BIN" -m unittest -q \
