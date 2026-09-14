@@ -12,7 +12,9 @@ fi
 
 "$PROJECT_ROOT/scripts/verify_synthetic_smoke.sh"
 
-PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON_BIN" -m unittest -q tests.test_architecture_smoke
+PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON_BIN" -m unittest -q \
+  tests.test_agent_roles \
+  tests.test_architecture_smoke
 
 PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON_BIN" -c '
 from neurolab.architecture_smoke import run_architecture_smoke

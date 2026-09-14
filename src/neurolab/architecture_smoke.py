@@ -9,6 +9,7 @@ orchestration layer and supplies only its constrained evidence.
 from dataclasses import dataclass
 from typing import Iterable
 
+from neurolab.agent_roles import require_allowed_action, required_role_actions
 from neurolab.engineering_policy import ReviewReceipt, require_reviewable_change
 from neurolab.synthetic_mcp_trace import TraceState, run_synthetic_mcp_trace
 from neurolab.workflow import WorkflowState, run_smoke_task
@@ -45,6 +46,9 @@ def run_architecture_smoke(
     if workflow_state["status"] != "validated":
         raise ValueError("architecture workflow did not validate")
 
+    for role, action in required_role_actions():
+        require_allowed_action(role, action)
+
     mcp_state: TraceState = run_synthetic_mcp_trace(
         task, thread_id=f"{thread_id}:mcp"
     )
@@ -60,6 +64,7 @@ def run_architecture_smoke(
 
     audit = (
         "workflow:validated",
+        "roles:default-deny",
         "mcp-policy:accepted-untrusted-data",
         "worktree-evidence:constrained",
         f"acceptance:{receipt.decision}",

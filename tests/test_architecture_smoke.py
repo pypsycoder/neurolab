@@ -21,6 +21,7 @@ class ArchitectureSmokeTests(unittest.TestCase):
             state.audit,
             (
                 "workflow:validated",
+                "roles:default-deny",
                 "mcp-policy:accepted-untrusted-data",
                 "worktree-evidence:constrained",
                 "acceptance:review_required",
