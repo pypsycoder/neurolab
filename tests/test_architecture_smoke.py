@@ -29,6 +29,7 @@ class ArchitectureSmokeTests(unittest.TestCase):
                 "mcp-policy:accepted-untrusted-data",
                 "worktree-evidence:constrained",
                 "acceptance:review_required",
+                "trace:metadata-validated",
             ),
         )
 

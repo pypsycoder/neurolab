@@ -20,6 +20,7 @@ from neurolab.agent_receipts import (
 )
 from neurolab.agent_transitions import require_allowed_transition, required_transitions
 from neurolab.engineering_policy import ReviewReceipt, require_reviewable_change
+from neurolab.run_trace import build_synthetic_run_trace
 from neurolab.synthetic_mcp_trace import TraceState, run_synthetic_mcp_trace
 from neurolab.workflow import WorkflowState, run_smoke_task
 
@@ -101,6 +102,13 @@ def run_architecture_smoke(
         "worktree-evidence:constrained",
         f"acceptance:{receipt.decision}",
     )
+    build_synthetic_run_trace(
+        thread_id=thread_id,
+        decision=receipt.decision,
+        latency_ms=elapsed_ms,
+        audit=audit,
+    )
+    audit = audit + ("trace:metadata-validated",)
     return ArchitectureSmokeReport(
         decision=receipt.decision,
         audit=audit,

@@ -17,7 +17,9 @@ LLM, OpenHands, Hermes, внешний поиск или рабочий репо
    fail-closed и не может породить итоговое решение.
 5. `neurolab.agent_budget`: ограничивает synthetic scenario пятью hand-off,
    5 секундами локальной policy-оценки и нулём внешних вызовов/cost units.
-6. `neurolab.architecture_smoke`: минимальный orchestration receipt, который
+6. `neurolab.run_trace`: создаёт redacted metadata trace без prompt/output,
+   source content, абсолютных путей или секретов.
+7. `neurolab.architecture_smoke`: минимальный orchestration receipt, который
    требует одновременно validated engineering workflow, role policy,
    transition policy, verified receipt, untrusted MCP trace и allowlisted
    tested diff.
@@ -48,6 +50,7 @@ review_required: workflow:validated
   → mcp-policy:accepted-untrusted-data
   → worktree-evidence:constrained
   → acceptance:review_required
+  → trace:metadata-validated
 ```
 
 Это техническое архитектурное доказательство, а не разрешение на
