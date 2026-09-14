@@ -25,6 +25,7 @@ class ArchitectureSmokeTests(unittest.TestCase):
                 "transitions:forward-only",
                 "receipt:verified-chain",
                 "receipt:complete",
+                "budget:within-limits",
                 "mcp-policy:accepted-untrusted-data",
                 "worktree-evidence:constrained",
                 "acceptance:review_required",

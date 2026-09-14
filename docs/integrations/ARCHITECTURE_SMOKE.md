@@ -15,7 +15,9 @@ LLM, OpenHands, Hermes, внешний поиск или рабочий репо
 4. `neurolab.agent_receipts`: in-memory receipt подтверждает порядок
    hand-off и детектирует изменение цепочки по digest; незавершённая цепочка
    fail-closed и не может породить итоговое решение.
-5. `neurolab.architecture_smoke`: минимальный orchestration receipt, который
+5. `neurolab.agent_budget`: ограничивает synthetic scenario пятью hand-off,
+   5 секундами локальной policy-оценки и нулём внешних вызовов/cost units.
+6. `neurolab.architecture_smoke`: минимальный orchestration receipt, который
    требует одновременно validated engineering workflow, role policy,
    transition policy, verified receipt, untrusted MCP trace и allowlisted
    tested diff.
@@ -42,6 +44,7 @@ review_required: workflow:validated
   → transitions:forward-only
   → receipt:verified-chain
   → receipt:complete
+  → budget:within-limits
   → mcp-policy:accepted-untrusted-data
   → worktree-evidence:constrained
   → acceptance:review_required

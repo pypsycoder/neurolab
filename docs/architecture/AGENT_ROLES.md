@@ -37,3 +37,9 @@ shell, Docker socket, Git push/merge, deploy, чтения `.env`, секрет�
 `require_completed_transition_receipt()` принимает только проверенную цепочку,
 дошедшую до `reported`. Поэтому при остановке или пропуске этапа итоговое
 решение не создаётся (fail-closed).
+
+`neurolab.agent_budget` ограничивает именно этот local-only smoke пятью
+hand-off, 5 секундами локальной policy-оценки, нулём внешних вызовов и нулём
+cost units. Проверка fail-closed при превышении любого значения. Это не
+фактический billing, scheduler или принудительное ограничение процесса; для
+live интеграций нужны отдельные лимиты транспорта, провайдера и sandbox.

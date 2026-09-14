@@ -7,8 +7,10 @@ orchestration layer and supplies only its constrained evidence.
 """
 
 from dataclasses import dataclass
+from time import monotonic
 from typing import Iterable
 
+from neurolab.agent_budget import require_within_budget
 from neurolab.agent_roles import require_allowed_action, required_role_actions
 from neurolab.agent_receipts import (
     append_transition,
@@ -47,6 +49,7 @@ def run_architecture_smoke(
     and a concrete test result.
     """
 
+    started_at = monotonic()
     workflow_state: WorkflowState = run_smoke_task(
         task, "engineering", thread_id=f"{thread_id}:workflow"
     )
@@ -66,6 +69,13 @@ def run_architecture_smoke(
         transition_receipt = append_transition(transition_receipt, transition)
     verify_transition_receipt(transition_receipt)
     require_completed_transition_receipt(transition_receipt)
+    elapsed_ms = int((monotonic() - started_at) * 1_000)
+    require_within_budget(
+        transitions=len(transition_receipt.transitions),
+        elapsed_ms=elapsed_ms,
+        external_calls=0,
+        cost_units=0,
+    )
 
     mcp_state: TraceState = run_synthetic_mcp_trace(
         task, thread_id=f"{thread_id}:mcp"
@@ -86,6 +96,7 @@ def run_architecture_smoke(
         "transitions:forward-only",
         "receipt:verified-chain",
         "receipt:complete",
+        "budget:within-limits",
         "mcp-policy:accepted-untrusted-data",
         "worktree-evidence:constrained",
         f"acceptance:{receipt.decision}",
