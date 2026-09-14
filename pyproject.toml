@@ -9,6 +9,7 @@ description = "Исследовательский контур НейроЛаб�
 requires-python = ">=3.11"
 dependencies = [
     "gigachat==0.2.3",
+    "langgraph==1.2.11",
 ]
 
 [tool.setuptools.packages.find]
