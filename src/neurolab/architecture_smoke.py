@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from neurolab.agent_roles import require_allowed_action, required_role_actions
+from neurolab.agent_transitions import require_allowed_transition, required_transitions
 from neurolab.engineering_policy import ReviewReceipt, require_reviewable_change
 from neurolab.synthetic_mcp_trace import TraceState, run_synthetic_mcp_trace
 from neurolab.workflow import WorkflowState, run_smoke_task
@@ -48,6 +49,13 @@ def run_architecture_smoke(
 
     for role, action in required_role_actions():
         require_allowed_action(role, action)
+    for transition in required_transitions():
+        require_allowed_transition(
+            from_state=transition.from_state,
+            to_state=transition.to_state,
+            role=transition.role,
+            action=transition.action,
+        )
 
     mcp_state: TraceState = run_synthetic_mcp_trace(
         task, thread_id=f"{thread_id}:mcp"
@@ -65,6 +73,7 @@ def run_architecture_smoke(
     audit = (
         "workflow:validated",
         "roles:default-deny",
+        "transitions:forward-only",
         "mcp-policy:accepted-untrusted-data",
         "worktree-evidence:constrained",
         f"acceptance:{receipt.decision}",

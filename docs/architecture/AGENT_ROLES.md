@@ -20,3 +20,9 @@ shell, Docker socket, Git push/merge, deploy, чтения `.env`, секрет�
 `required_role_actions()` описывает минимальную synthetic инженерную цепочку,
 которую проверяет architecture smoke. Это доказательство разделения
 полномочий, а не подключение реальных агентов или сервисов.
+
+`neurolab.agent_transitions` добавляет отдельный default-deny gate для
+передачи управления. Разрешён только линейный путь
+`planned → routed → worktree_edited → tested → reviewed → reported` с точно
+заданными ролью и действием на каждом шаге. Пропуск, повтор, обратный переход
+или замена роли отклоняются до исполнения.

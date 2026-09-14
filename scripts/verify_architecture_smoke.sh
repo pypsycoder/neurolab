@@ -14,6 +14,7 @@ fi
 
 PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON_BIN" -m unittest -q \
   tests.test_agent_roles \
+  tests.test_agent_transitions \
   tests.test_architecture_smoke
 
 PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON_BIN" -c '
