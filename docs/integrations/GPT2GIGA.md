@@ -33,10 +33,28 @@
 Исходники и локальная конфигурация остаются в `runtime/`, который исключён из
 Git; значения ключей не выводились и не попадают в репозиторий.
 
+## Офлайн-контракты tool calls
+
+Для pinned исходников создано отдельное игнорируемое test-окружение. Тесты
+запускались с пустым окружением и инертными значениями credentials, поэтому не
+получали реальные ключи. Пройдены:
+
+| Набор | Результат |
+|---|---|
+| `tests/test_utils/test_convert_tools.py` | 33 passed при запрете сокетов: нормализация JSON Schema и преобразование tool definitions выполняются без сети. |
+| `test_openai_chat_tools_matches_golden_fixture` | passed: OpenAI chat tool payload соответствует golden fixture. |
+| `tests/test_protocol/test_openai_compatible_protocol_bridge.py` | 9 passed: hermetic test workload для OpenAI, Anthropic и Gemini, включая обработку потери `tool_choice` до I/O. |
+
+Итого целевой повторный набор: **43 passed, 1 warning**. Protocol-тесты
+используют локальные event-loop/ASGI-сокеты, поэтому полный запрет сокетов для
+них неприменим; они запускались без рабочих credentials и с upstream test
+doubles. Это подтверждает преобразование протоколов, но не доказывает живой
+tool call у GigaChat при текущих лимитах.
+
 ## Ограничения и следующий шаг
 
-Проверены только health, model discovery и простой нестриминговый chat request.
-Перед постоянным включением адаптера требуются отдельные проверки streaming,
-structured output, tool calls, timeout/retry, отказа upstream и авторизации
-клиента. Открывать proxy наружу, включать в пациентский контур или передавать
-реальные данные запрещено.
+Проверены health, model discovery, простой нестриминговый chat request и
+офлайн-контракты tool calls. Перед постоянным включением адаптера требуются
+живые проверки streaming, tool calls с trace, timeout/retry, честного отказа
+при 429/сбое upstream и авторизации клиента. Открывать proxy наружу, включать
+в пациентский контур или передавать реальные данные запрещено.
