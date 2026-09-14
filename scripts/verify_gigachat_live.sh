@@ -21,6 +21,15 @@ export RUN_GIGACHAT_LIVE=1
 export NEUROLAB_ENV_FILE="$env_file"
 export NEUROLAB_GIGACHAT_CREDENTIAL_ENV="${NEUROLAB_GIGACHAT_CREDENTIAL_ENV:-GIGACHAT_CREDENTIALS}"
 
+# httpx may use certifi instead of the OS store. Point this one test process to
+# the reviewed system bundle so TLS stays enabled and includes the approved CA.
+system_ca_bundle="${NEUROLAB_SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}"
+if [[ ! -f "$system_ca_bundle" ]]; then
+  echo "Trusted CA bundle not found: $system_ca_bundle" >&2
+  exit 1
+fi
+export SSL_CERT_FILE="$system_ca_bundle"
+
 exec .venv/bin/python -c '
 import os
 import sys
