@@ -66,6 +66,11 @@ injection остаётся данными, а неизвестный tool или
 
 Этот graph не открывает MCP transport повторно и не запускает LLM, Git,
 файловые операции или сеть: transport и sandbox проверяются отдельными E2E
-тестами выше. Следующий подэтап — воспроизводимый 1.7 smoke runner, который
-свяжет существующие test-only проверки в один отчёт, не включая внешний поиск,
-Hermes live-search, OpenHands или рабочий репозиторий.
+тестами выше.
+
+`scripts/verify_synthetic_smoke.sh` собирает эти доказательства в один
+воспроизводимый RP5 pre-smoke: policy/stdio/LangGraph tests, opt-in Docker
+fixture tests и компактный synthetic LangGraph report. Скрипт не читает `.env`
+и не включает внешний поиск, Hermes live-search, OpenHands или рабочий
+репозиторий. Поэтому он служит baseline для 1.7, но не закрывает полный
+сквозной сценарий из дорожной карты.
