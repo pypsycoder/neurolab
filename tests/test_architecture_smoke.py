@@ -23,6 +23,7 @@ class ArchitectureSmokeTests(unittest.TestCase):
                 "workflow:validated",
                 "roles:default-deny",
                 "transitions:forward-only",
+                "receipt:verified-chain",
                 "mcp-policy:accepted-untrusted-data",
                 "worktree-evidence:constrained",
                 "acceptance:review_required",

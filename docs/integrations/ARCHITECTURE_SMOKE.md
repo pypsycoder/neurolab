@@ -12,9 +12,12 @@ LLM, OpenHands, Hermes, внешний поиск или рабочий репо
    smoke проверяет разделение полномочий до создания итогового receipt.
 3. `neurolab.agent_transitions`: default-deny state machine разрешает только
    пять заранее описанных forward-only hand-off между ролями.
-4. `neurolab.architecture_smoke`: минимальный orchestration receipt, который
+4. `neurolab.agent_receipts`: in-memory receipt подтверждает порядок
+   hand-off и детектирует изменение цепочки по digest.
+5. `neurolab.architecture_smoke`: минимальный orchestration receipt, который
    требует одновременно validated engineering workflow, role policy,
-   transition policy, untrusted MCP trace и allowlisted tested diff.
+   transition policy, verified receipt, untrusted MCP trace и allowlisted
+   tested diff.
 3. `require_reviewable_change`: единственный успешный исход —
    `review_required`. Runner не делает merge, push или deploy.
 
@@ -36,6 +39,7 @@ LLM, OpenHands, Hermes, внешний поиск или рабочий репо
 review_required: workflow:validated
   → roles:default-deny
   → transitions:forward-only
+  → receipt:verified-chain
   → mcp-policy:accepted-untrusted-data
   → worktree-evidence:constrained
   → acceptance:review_required
