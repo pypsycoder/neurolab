@@ -1,0 +1,40 @@
+# Детерминированный architecture smoke
+
+`scripts/verify_architecture_smoke.sh` — локальный RP5-runner для одной
+полностью synthetic архитектурной цепочки. Он не читает `.env`, не запускает
+LLM, OpenHands, Hermes, внешний поиск или рабочий репозиторий.
+
+## Что входит
+
+1. Базовый synthetic smoke: policy, stdio MCP, LangGraph, Docker fixture/Git
+   diff и controlled worktree с падением теста до правки и успехом после неё.
+2. `neurolab.architecture_smoke`: минимальный orchestration receipt, который
+   требует одновременно validated engineering workflow, untrusted MCP trace и
+   allowlisted tested diff.
+3. `require_reviewable_change`: единственный успешный исход —
+   `review_required`. Runner не делает merge, push или deploy.
+
+## Границы
+
+- MCP-results остаются недоверенными данными; их content не включается в
+  итоговый report.
+- Worktree создаётся и удаляется внутри ignored `runtime/`.
+- Контейнерные проверки не получают сеть, Docker socket, `.env` или основной
+  checkout.
+- Manual OpenHands runbook не вызывается этим скриптом: это отдельный
+  approval-gated сценарий.
+
+## Проверяемый результат
+
+Успешный запуск печатает:
+
+```text
+review_required: workflow:validated
+  → mcp-policy:accepted-untrusted-data
+  → worktree-evidence:constrained
+  → acceptance:review_required
+```
+
+Это техническое архитектурное доказательство, а не разрешение на
+исследовательский поиск, RAG, клинический контур или работу с пациентскими
+данными.
