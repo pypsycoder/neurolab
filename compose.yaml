@@ -118,6 +118,33 @@ services:
         max-file: "3"
     networks: [control_plane]
 
+  research:
+    build:
+      context: .
+      dockerfile: research/Dockerfile
+    profiles: [research]
+    # Matches the RP5 project owner by default, so the container can write only
+    # the dedicated ignored artifact directory rather than running as root.
+    user: "${RESEARCH_UID:-1000}:${RESEARCH_GID:-1000}"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
+      CROSSREF_MAILTO: ${CROSSREF_MAILTO:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./runtime/it-research:/app/runtime/it-research
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    networks: [control_plane]
+
 networks:
   control_plane:
     name: neuro-lab-control-plane
