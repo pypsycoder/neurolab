@@ -74,3 +74,11 @@ fixture tests и компактный synthetic LangGraph report. Скрипт �
 и не включает внешний поиск, Hermes live-search, OpenHands или рабочий
 репозиторий. Поэтому он служит baseline для 1.7, но не закрывает полный
 сквозной сценарий из дорожной карты.
+
+Для controlled учебного шага runner вызывает
+`scripts/verify_synthetic_worktree.sh`. Тот создаёт удаляемый temporary Git
+worktree из versioned synthetic fixture, доказывает падение baseline-test,
+копирует заранее заданную учебную правку, повторно запускает тест с отключённым
+bytecode cache и допускает diff только `calculator.py`. Этот шаг не запускает
+LLM или OpenHands и не монтирует рабочий репозиторий; он доказывает только
+границы последовательности «test → fix → test → diff».

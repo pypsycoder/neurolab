@@ -29,3 +29,5 @@ state = run_synthetic_mcp_trace("synthetic pre-smoke", thread_id="synthetic-pre-
 assert state["status"] == "validated"
 print(state["report"])
 '
+
+"$PROJECT_ROOT/scripts/verify_synthetic_worktree.sh"
