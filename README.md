@@ -58,8 +58,14 @@ docker compose run --rm orchestrator python probe_models.py \
 cd /opt/neuro-lab
 docker compose config --quiet
 docker compose up -d
+./scripts/apply_migrations.sh --apply
 docker compose ps
 ```
+
+При обновлении кода с новой миграцией сначала поднять PostgreSQL, затем
+выполнить `./scripts/apply_migrations.sh --apply`, и только после этого
+пересоздавать worker/monitor. Скрипт не исполняет `.env` и ведёт в БД
+идемпотентный журнал применённых имён миграций.
 
 ## Web-панель
 

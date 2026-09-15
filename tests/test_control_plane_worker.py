@@ -30,6 +30,10 @@ class FakeQueue:
     def rpush(self, key, value):
         self.pushed.append((key, value))
 
+    def eval(self, script, keys, *args):
+        self.eval_call = (script, keys, args)
+        return 1
+
 
 class ControlPlaneWorkerTests(unittest.TestCase):
     def setUp(self):
@@ -89,10 +93,10 @@ class ControlPlaneWorkerTests(unittest.TestCase):
 
     def test_unexpected_exception_is_not_exposed_as_a_database_error(self):
         self.worker.heartbeat = Mock()
-        self.worker.record_task = Mock()
+        self.worker.claim_task = Mock(return_value="00000000-0000-0000-0000-000000000002")
         self.worker.gigachat.complete = Mock(side_effect=RuntimeError("postgresql://secret@host"))
         recorded = []
-        self.worker.record_failed = Mock(side_effect=lambda task_id, exc: recorded.append(exc))
+        self.worker.record_failed = Mock(side_effect=lambda task_id, execution_id, exc: recorded.append(exc))
 
         with self.assertLogs("neuro_lab.worker", level="ERROR") as captured:
             self.assertTrue(
@@ -103,11 +107,32 @@ class ControlPlaneWorkerTests(unittest.TestCase):
 
     def test_delivery_is_retained_when_failure_cannot_be_persisted(self):
         self.worker.heartbeat = Mock()
-        self.worker.record_task = Mock(side_effect=RuntimeError("database unavailable"))
+        self.worker.claim_task = Mock(side_effect=RuntimeError("database unavailable"))
         self.worker.record_failed = Mock(side_effect=RuntimeError("database unavailable"))
 
         self.assertFalse(
             self.worker.handle_delivery('{"task_id":"00000000-0000-0000-0000-000000000001","provider":"gigachat"}')
+        )
+
+    def test_duplicate_delivery_is_acknowledged_without_a_provider_call(self):
+        self.worker.heartbeat = Mock()
+        self.worker.claim_task = Mock(return_value=None)
+        self.worker.gigachat.complete = Mock()
+
+        self.assertTrue(
+            self.worker.handle_delivery('{"task_id":"00000000-0000-0000-0000-000000000001","provider":"gigachat"}')
+        )
+        self.worker.gigachat.complete.assert_not_called()
+
+    def test_recovery_moves_exact_processing_payload_atomically(self):
+        fake_queue = FakeQueue()
+        self.worker.queue = fake_queue
+
+        self.assertEqual(self.worker.requeue_stale_delivery('{"task_id":"id"}'), 1)
+        self.assertEqual(fake_queue.eval_call[1], 2)
+        self.assertEqual(
+            fake_queue.eval_call[2],
+            (self.worker.PROCESSING_QUEUE, self.worker.TASK_QUEUE, '{"task_id":"id"}'),
         )
 
 

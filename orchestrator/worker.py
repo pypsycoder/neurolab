@@ -24,6 +24,10 @@ last_heartbeat_at = 0.0
 TASK_QUEUE = "neuro-lab:tasks"
 PROCESSING_QUEUE = "neuro-lab:tasks:processing"
 DEAD_LETTER_QUEUE = "neuro-lab:tasks:dead"
+TASK_LEASE_SECONDS = max(180, int(os.getenv("ORCHESTRATOR_TASK_LEASE_SECONDS", "900")))
+RECOVERY_INTERVAL_SECONDS = max(
+    15, int(os.getenv("ORCHESTRATOR_RECOVERY_INTERVAL_SECONDS", "60"))
+)
 
 
 class ProviderError(RuntimeError):
@@ -242,36 +246,56 @@ class GigaChatClient:
 gigachat = GigaChatClient()
 
 
-def record_task(task_id, payload):
+def claim_task(task_id, payload):
+    """Atomically claim a queued task and return its execution lease ID.
+
+    A duplicate delivery is acknowledged without a second provider call.  A
+    task whose worker dies can later be returned to ``queued`` only after its
+    execution lease expires.
+    """
+    execution_id = str(uuid.uuid4())
     with psycopg.connect(db_url) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO tasks (id, status, started_at, provider, model, request_ref)
-                   VALUES (%s, 'running', now(), %s, %s, %s)
-                   ON CONFLICT (id) DO UPDATE SET status='running', started_at=now(), error_message=NULL""",
+                """INSERT INTO tasks (id, status, provider, model, request_ref)
+                   VALUES (%s, 'queued', %s, %s, %s)
+                   ON CONFLICT (id) DO NOTHING""",
                 (task_id, payload.get("provider"), payload.get("model"), payload.get("request_ref")),
             )
+            cur.execute(
+                """UPDATE tasks
+                   SET status='running', started_at=now(), completed_at=NULL,
+                       error_message=NULL, execution_id=%s
+                   WHERE id=%s AND status='queued'
+                   RETURNING execution_id""",
+                (execution_id, task_id),
+            )
+            row = cur.fetchone()
             conn.commit()
+    return str(row[0]) if row else None
 
 
-def record_succeeded(task_id, result):
+def record_succeeded(task_id, execution_id, result):
     with psycopg.connect(db_url) as conn:
-        conn.execute(
+        cursor = conn.execute(
             """UPDATE tasks
                SET status='succeeded', completed_at=now(), model=COALESCE(%s, model), result=%s
-               WHERE id=%s""",
-            (result.get("model"), json.dumps(result), task_id),
+               WHERE id=%s AND status='running' AND execution_id=%s""",
+            (result.get("model"), json.dumps(result), task_id, execution_id),
         )
         conn.commit()
+    return cursor.rowcount == 1
 
 
-def record_failed(task_id, exc):
+def record_failed(task_id, execution_id, exc):
     with psycopg.connect(db_url) as conn:
-        conn.execute(
-            "UPDATE tasks SET status='failed', completed_at=now(), error_message=%s WHERE id=%s",
-            (safe_error_message(exc), task_id),
+        cursor = conn.execute(
+            """UPDATE tasks SET status='failed', completed_at=now(), error_message=%s
+               WHERE id=%s AND status='running' AND execution_id=%s""",
+            (safe_error_message(exc), task_id, execution_id),
         )
         conn.commit()
+    return cursor.rowcount == 1
 
 
 def record_cost(task_id, provider, model, usage, credential_lane=None, amount_usd=None):
@@ -292,6 +316,7 @@ def record_cost(task_id, provider, model, usage, credential_lane=None, amount_us
 def ensure_schema():
     with psycopg.connect(db_url) as conn:
         conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS result JSONB")
+        conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS execution_id UUID")
         conn.execute(
             """CREATE TABLE IF NOT EXISTS worker_heartbeats (
                    worker_name TEXT PRIMARY KEY,
@@ -321,6 +346,45 @@ def heartbeat(status):
         log.warning("worker heartbeat failed", exc_info=True)
 
 
+def requeue_stale_delivery(raw_payload):
+    """Move one exact processing item back to the queue in one Redis script."""
+    return queue.eval(
+        """if redis.call('LREM', KEYS[1], 1, ARGV[1]) == 1 then
+              redis.call('LPUSH', KEYS[2], ARGV[1])
+              return 1
+            end
+            return 0""",
+        2,
+        PROCESSING_QUEUE,
+        TASK_QUEUE,
+        raw_payload,
+    )
+
+
+def recover_stale_deliveries():
+    """Requeue expired leases; never reclaim a currently valid execution."""
+    for raw_payload in queue.lrange(PROCESSING_QUEUE, 0, -1):
+        try:
+            payload = json.loads(raw_payload)
+            task_id = payload["task_id"]
+        except (TypeError, KeyError, ValueError, json.JSONDecodeError):
+            continue
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE tasks
+                       SET status='queued', started_at=NULL, execution_id=NULL
+                       WHERE id=%s AND status='running'
+                         AND started_at < now() - make_interval(secs => %s)
+                       RETURNING id""",
+                    (task_id, TASK_LEASE_SECONDS),
+                )
+                recovered = cur.fetchone() is not None
+                conn.commit()
+        if recovered and requeue_stale_delivery(raw_payload):
+            log.warning("requeued expired task lease %s", task_id)
+
+
 def handle_delivery(raw_payload):
     """Handle one durable Redis delivery.
 
@@ -338,9 +402,13 @@ def handle_delivery(raw_payload):
         return True
 
     task_id = payload.get("task_id") or str(uuid.uuid4())
+    execution_id = None
     try:
         heartbeat("running")
-        record_task(task_id, payload)
+        execution_id = claim_task(task_id, payload)
+        if execution_id is None:
+            log.info("acknowledging duplicate or already-final task %s", task_id)
+            return True
         if payload.get("provider") == "gigachat":
             operation = payload.get("operation", "chat")
             if operation == "chat":
@@ -349,12 +417,12 @@ def handle_delivery(raw_payload):
                 result = gigachat.embed(payload)
             else:
                 raise ProviderError(f"unsupported GigaChat operation: {operation}")
-            record_succeeded(task_id, result)
-            record_cost(task_id, "gigachat", result["model"], result["usage"], result["credential_lane"])
+            if record_succeeded(task_id, execution_id, result):
+                record_cost(task_id, "gigachat", result["model"], result["usage"], result["credential_lane"])
         elif payload.get("provider") == "local-smoke-test":
             result = {"model": payload.get("model"), "content": None, "credential_lane": "local"}
-            record_succeeded(task_id, result)
-            record_cost(task_id, "local-smoke-test", payload.get("model"), payload.get("usage", {}), "local", payload.get("amount_usd", 0))
+            if record_succeeded(task_id, execution_id, result):
+                record_cost(task_id, "local-smoke-test", payload.get("model"), payload.get("usage", {}), "local", payload.get("amount_usd", 0))
         else:
             raise ProviderError(f"unsupported provider: {payload.get('provider')}")
         log.info("recorded task %s", task_id)
@@ -363,7 +431,9 @@ def handle_delivery(raw_payload):
         # connection URLs.  The database receives the same safe summary.
         log.error("failed task %s: %s", task_id, safe_error_message(exc))
         try:
-            record_failed(task_id, exc)
+            if execution_id is None:
+                raise RuntimeError("task was not claimed")
+            record_failed(task_id, execution_id, exc)
         except Exception:
             log.error(
                 "could not persist failure for task %s; retaining delivery (%s)",
@@ -379,7 +449,14 @@ def handle_delivery(raw_payload):
 
 def run_worker():
     ensure_schema()
+    last_recovery_at = 0.0
     while True:
+        if time.monotonic() - last_recovery_at >= RECOVERY_INTERVAL_SECONDS:
+            try:
+                recover_stale_deliveries()
+            except Exception:
+                log.error("processing-queue recovery failed; deliveries retained")
+            last_recovery_at = time.monotonic()
         heartbeat("idle")
         raw_payload = queue.blmove(
             TASK_QUEUE,

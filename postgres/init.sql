@@ -8,10 +8,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   model TEXT,
   request_ref TEXT,
   result JSONB,
+  execution_id UUID,
   error_message TEXT
 );
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS result JSONB;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS execution_id UUID;
 
 CREATE TABLE IF NOT EXISTS cost_events (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
