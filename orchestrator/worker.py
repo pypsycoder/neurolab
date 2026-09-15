@@ -32,10 +32,18 @@ RECOVERY_INTERVAL_SECONDS = max(
 # A dashboard process can theoretically stop after committing the task row but
 # before RPUSH.  Do not treat a brief queue delay as an orphan: this is only a
 # bounded repair for rows that have been absent from both durable Redis lists
-# for a long time.  A production outbox remains the future stronger solution.
+# for a long time.  The dispatch outbox below is the primary repair path;
+# this reaper remains a bounded safeguard for legacy or manually-created rows.
 ORPHANED_QUEUED_SECONDS = max(
     300, int(os.getenv("ORCHESTRATOR_ORPHANED_QUEUED_SECONDS", "1800"))
 )
+OUTBOX_DISPATCH_INTERVAL_SECONDS = max(
+    1, int(os.getenv("ORCHESTRATOR_OUTBOX_DISPATCH_INTERVAL_SECONDS", "3"))
+)
+OUTBOX_CLAIM_SECONDS = max(
+    30, int(os.getenv("ORCHESTRATOR_OUTBOX_CLAIM_SECONDS", "90"))
+)
+OUTBOX_BATCH_SIZE = max(1, int(os.getenv("ORCHESTRATOR_OUTBOX_BATCH_SIZE", "16")))
 
 
 class ProviderError(RuntimeError):
@@ -361,6 +369,100 @@ def heartbeat(status):
         log.warning("worker heartbeat failed", exc_info=True)
 
 
+def claim_pending_outbox():
+    """Claim a bounded batch of undelivered dashboard requests.
+
+    A crash before Redis acknowledgement merely lets the short-lived claim
+    expire.  A crash after RPUSH can create a duplicate delivery, which is
+    safe because ``claim_task`` is the single provider-execution gate.
+    """
+    delivery_claim_id = str(uuid.uuid4())
+    with psycopg.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """WITH candidates AS (
+                       SELECT outbox.task_id
+                       FROM task_outbox AS outbox
+                       JOIN tasks ON tasks.id = outbox.task_id
+                       WHERE outbox.delivered_at IS NULL
+                         AND tasks.status='queued'
+                         AND (
+                             outbox.delivery_claimed_at IS NULL OR
+                             outbox.delivery_claimed_at < now() - make_interval(secs => %s)
+                         )
+                       ORDER BY outbox.created_at
+                       FOR UPDATE OF outbox SKIP LOCKED
+                       LIMIT %s
+                   )
+                   UPDATE task_outbox AS outbox
+                   SET delivery_claim_id=%s,
+                       delivery_claimed_at=now(),
+                       delivery_attempts=outbox.delivery_attempts + 1,
+                       last_error=NULL
+                   FROM candidates
+                   WHERE outbox.task_id=candidates.task_id
+                   RETURNING outbox.task_id, outbox.payload, outbox.delivery_claim_id""",
+                (OUTBOX_CLAIM_SECONDS, OUTBOX_BATCH_SIZE, delivery_claim_id),
+            )
+            claimed = cur.fetchall()
+            conn.commit()
+    return [(str(task_id), payload, str(claim_id)) for task_id, payload, claim_id in claimed]
+
+
+def mark_outbox_delivered(task_id, delivery_claim_id):
+    with psycopg.connect(db_url) as conn:
+        cursor = conn.execute(
+            """UPDATE task_outbox
+               SET delivered_at=now(), delivery_claim_id=NULL, delivery_claimed_at=NULL,
+                   last_error=NULL
+               WHERE task_id=%s AND delivered_at IS NULL AND delivery_claim_id=%s""",
+            (task_id, delivery_claim_id),
+        )
+        conn.commit()
+    return cursor.rowcount == 1
+
+
+def record_outbox_delivery_error(task_id, delivery_claim_id, exc):
+    """Retain the claim until expiry; a healthy worker must not hot-loop Redis."""
+    with psycopg.connect(db_url) as conn:
+        conn.execute(
+            """UPDATE task_outbox
+               SET last_error=%s
+               WHERE task_id=%s AND delivered_at IS NULL AND delivery_claim_id=%s""",
+            (f"delivery error: {type(exc).__name__}", task_id, delivery_claim_id),
+        )
+        conn.commit()
+
+
+def publish_outbox_claim(task_id, payload, delivery_claim_id):
+    """Publish one verified outbox row, then acknowledge its DB delivery claim."""
+    validated_task_id = validate_payload(payload, require_task_id=True)
+    if validated_task_id != task_id:
+        raise ValueError("outbox task ID does not match payload task ID")
+    task_queue_payload = json.dumps(payload, ensure_ascii=False)
+    queue.rpush(TASK_QUEUE, task_queue_payload)
+    return mark_outbox_delivered(task_id, delivery_claim_id)
+
+
+def dispatch_pending_outbox():
+    """Deliver committed dashboard requests without relying on dashboard uptime."""
+    try:
+        claimed = claim_pending_outbox()
+    except psycopg.Error as exc:
+        log.warning("outbox claim failed (%s)", type(exc).__name__)
+        return
+    for task_id, payload, delivery_claim_id in claimed:
+        try:
+            if publish_outbox_claim(task_id, payload, delivery_claim_id):
+                log.info("delivered outbox task %s", task_id)
+        except (redis.RedisError, psycopg.Error, TypeError, ValueError, json.JSONDecodeError) as exc:
+            log.warning("outbox delivery retained for task %s (%s)", task_id, type(exc).__name__)
+            try:
+                record_outbox_delivery_error(task_id, delivery_claim_id, exc)
+            except psycopg.Error:
+                log.warning("could not record outbox delivery error for task %s", task_id)
+
+
 def requeue_stale_delivery(raw_payload):
     """Move one exact processing item back to the queue in one Redis script."""
     return queue.eval(
@@ -586,7 +688,11 @@ def handle_delivery(raw_payload):
 
 def run_worker():
     last_recovery_at = 0.0
+    last_outbox_dispatch_at = 0.0
     while True:
+        if time.monotonic() - last_outbox_dispatch_at >= OUTBOX_DISPATCH_INTERVAL_SECONDS:
+            dispatch_pending_outbox()
+            last_outbox_dispatch_at = time.monotonic()
         if time.monotonic() - last_recovery_at >= RECOVERY_INTERVAL_SECONDS:
             try:
                 recover_stale_deliveries()

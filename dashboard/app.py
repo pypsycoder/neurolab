@@ -87,31 +87,27 @@ def daily_lane_task_count(credential_lane):
 
 
 def record_queued_task(task_id, payload):
-    """Persist the dashboard-visible queued state before delivery to Redis."""
+    """Atomically persist a queued task and its durable dispatch outbox row."""
     with psycopg.connect(DATABASE_URL) as conn:
-        conn.execute(
-            """INSERT INTO tasks (id, status, provider, model, credential_lane, request_ref)
-               VALUES (%s, 'queued', %s, %s, %s, %s)
-               ON CONFLICT (id) DO NOTHING""",
-            (
-                task_id,
-                payload["provider"],
-                payload["model"],
-                payload["credential_lane"],
-                payload["request_ref"],
-            ),
-        )
-        conn.commit()
-
-
-def record_enqueue_failure(task_id):
-    with psycopg.connect(DATABASE_URL) as conn:
-        conn.execute(
-            """UPDATE tasks SET status='failed', completed_at=now(),
-               error_message='Task queue is unavailable before delivery'
-               WHERE id=%s AND status='queued'""",
-            (task_id,),
-        )
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO tasks (id, status, provider, model, credential_lane, request_ref)
+                   VALUES (%s, 'queued', %s, %s, %s, %s)
+                   ON CONFLICT (id) DO NOTHING""",
+                (
+                    task_id,
+                    payload["provider"],
+                    payload["model"],
+                    payload["credential_lane"],
+                    payload["request_ref"],
+                ),
+            )
+            cur.execute(
+                """INSERT INTO task_outbox (task_id, payload)
+                   VALUES (%s, %s)
+                   ON CONFLICT (task_id) DO NOTHING""",
+                (task_id, json.dumps(payload, ensure_ascii=False)),
+            )
         conn.commit()
 
 
@@ -218,7 +214,7 @@ def get_temperature(hours: int = 1):
     return {"hours": hours, "samples": samples}
 
 
-@app.post("/api/tasks")
+@app.post("/api/tasks", status_code=202)
 def create_task(request: TaskRequest):
     if request.model not in CHAT_MODELS:
         raise HTTPException(status_code=422, detail="Unsupported chat model")
@@ -239,12 +235,7 @@ def create_task(request: TaskRequest):
         if daily_lane_task_count(request.credential_lane) >= MAX_TASKS_PER_LANE_PER_DAY:
             raise HTTPException(status_code=429, detail="Credential lane reached its daily task budget")
         record_queued_task(task_id, payload)
-        task_queue.rpush(TASK_QUEUE, json.dumps(payload, ensure_ascii=False))
     except redis.RedisError as exc:
-        try:
-            record_enqueue_failure(task_id)
-        except psycopg.Error:
-            pass
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from exc
     except psycopg.Error as exc:
         raise HTTPException(status_code=503, detail="Task state is unavailable") from exc

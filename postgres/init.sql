@@ -32,6 +32,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS cost_events_task_execution_unique
   ON cost_events(task_id, execution_id)
   WHERE task_id IS NOT NULL AND execution_id IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS task_outbox (
+  task_id UUID PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  delivered_at TIMESTAMPTZ,
+  delivery_claim_id UUID,
+  delivery_claimed_at TIMESTAMPTZ,
+  delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK (delivery_attempts >= 0),
+  last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS task_outbox_pending_idx
+  ON task_outbox(created_at)
+  WHERE delivered_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS worker_heartbeats (
   worker_name TEXT PRIMARY KEY,
   last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),

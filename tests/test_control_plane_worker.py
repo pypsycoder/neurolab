@@ -209,6 +209,24 @@ class ControlPlaneWorkerTests(unittest.TestCase):
 
         self.assertEqual(self.worker.delivery_task_ids(), {queued_id, processing_id})
 
+    def test_outbox_claim_is_published_then_acknowledged(self):
+        task_id = "00000000-0000-0000-0000-000000000009"
+        claim_id = "00000000-0000-0000-0000-000000000010"
+        fake_queue = FakeQueue()
+        self.worker.queue = fake_queue
+        self.worker.mark_outbox_delivered = Mock(return_value=True)
+
+        self.assertTrue(self.worker.publish_outbox_claim(
+            task_id,
+            {"task_id": task_id, "provider": "local-smoke-test"},
+            claim_id,
+        ))
+
+        self.assertEqual(fake_queue.pushed, [
+            (self.worker.TASK_QUEUE, '{"task_id": "00000000-0000-0000-0000-000000000009", "provider": "local-smoke-test"}')
+        ])
+        self.worker.mark_outbox_delivered.assert_called_once_with(task_id, claim_id)
+
     def test_recovery_moves_exact_processing_payload_atomically(self):
         fake_queue = FakeQueue()
         self.worker.queue = fake_queue

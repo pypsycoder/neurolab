@@ -37,7 +37,7 @@ class DashboardQueueTests(unittest.TestCase):
         self.dashboard.record_queued_task = Mock()
         self.dashboard.daily_lane_task_count = Mock(return_value=0)
 
-    def test_submission_persists_queued_state_then_enqueues(self):
+    def test_submission_persists_a_durable_outbox_task(self):
         self.dashboard.task_queue.llen.return_value = 0
         request = self.dashboard.TaskRequest(
             prompt="synthetic check", model="GigaChat-2-Pro", credential_lane="primary", max_tokens=32
@@ -47,7 +47,7 @@ class DashboardQueueTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "queued")
         self.dashboard.record_queued_task.assert_called_once()
-        self.dashboard.task_queue.rpush.assert_called_once()
+        self.dashboard.task_queue.rpush.assert_not_called()
 
     def test_submission_refuses_safe_queue_capacity(self):
         self.dashboard.task_queue.llen.return_value = self.dashboard.MAX_QUEUE_DEPTH
