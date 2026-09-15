@@ -67,6 +67,21 @@ docker compose ps
 пересоздавать worker/monitor. Скрипт не исполняет `.env` и ведёт в БД
 идемпотентный журнал применённых имён миграций.
 
+## Проверка durable delivery
+
+После изменения worker или Redis/PostgreSQL delivery-кода на RP5 можно
+запустить opt-in E2E-проверку:
+
+```bash
+./scripts/verify_control_plane_delivery_e2e.sh --apply
+```
+
+Она не читает `.env`, не вызывает GigaChat и создаёт только два новых
+synthetic `local-smoke-test` задания. Проверяются exactly-one cost event при
+duplicate delivery и возврат просроченной execution lease из processing queue.
+Перед recovery скрипт останавливается, если уже обнаружил чужие просроченные
+`running` задания: такие задания требуют отдельного разбора, а не теста.
+
 ## Web-панель
 
 После запуска dashboard доступен только локально на Pi по `http://127.0.0.1:8080`. Для безопасного удалённого доступа через tailnet включить Tailscale Serve и создать HTTPS proxy:
