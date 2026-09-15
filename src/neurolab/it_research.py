@@ -36,6 +36,7 @@ _PROVENANCE_URLS: dict[Provider, str] = {
 }
 _MAX_RESPONSE_BYTES = 1_000_000
 _ARXIV_SCAN_RESULTS = 20
+_ARXIV_ID = re.compile(r"^\d{4}\.\d{4,5}(?:v\d+)?$")
 _TOPIC = re.compile(r"^[^\r\n]{5,180}$")
 _TAG = re.compile(r"<[^>]+>")
 _TERM = re.compile(r"[a-z0-9][a-z0-9-]{2,}", re.IGNORECASE)
@@ -232,6 +233,53 @@ def search_arxiv(query: ItResearchQuery, transport: Transport = default_transpor
             )
         )
     return tuple(sorted(items, key=lambda item: _title_relevance(item.title, query.topic), reverse=True)[: query.max_results_per_provider])
+
+
+def lookup_arxiv_identifier(arxiv_id: str, transport: Transport = default_transport) -> ResearchItem:
+    """Retrieve one exact modern arXiv record through the allowlisted Atom API.
+
+    This is intentionally narrower than discovery search: callers supply only an
+    identifier, not an arbitrary URL or query. It permits a reviewer to attach
+    a paper that explicitly links to a public artifact without treating that
+    link as verified reproducibility evidence.
+    """
+    if not _ARXIV_ID.fullmatch(arxiv_id):
+        raise ItResearchError("only modern arXiv identifiers are allowed")
+    checked_on = _today()
+    payload = transport(
+        "https://export.arxiv.org/api/query?" + urlencode({"id_list": arxiv_id}),
+        {"User-Agent": "neurolab-it-research/0.1"},
+    )
+    try:
+        root = ElementTree.fromstring(payload)
+    except ElementTree.ParseError as error:
+        raise ItResearchError("arXiv returned invalid Atom XML") from error
+    atom = "{http://www.w3.org/2005/Atom}"
+    entries = root.findall(f"{atom}entry")
+    if len(entries) != 1:
+        raise ItResearchError("arXiv identifier did not resolve to exactly one record")
+    entry = entries[0]
+    identifier = _clean_text(entry.findtext(f"{atom}id"))
+    provider_id = identifier.rsplit("/", 1)[-1]
+    title = _clean_text(entry.findtext(f"{atom}title"))
+    if provider_id != arxiv_id or not title:
+        raise ItResearchError("arXiv record does not match the requested identifier")
+    authors = tuple(
+        name for author in entry.findall(f"{atom}author") if (name := _clean_text(author.findtext(f"{atom}name")))
+    )
+    categories = tuple(category.get("term", "") for category in entry.findall(f"{atom}category"))
+    return ResearchItem(
+        provider="arxiv",
+        provider_id=provider_id,
+        url=_https_url(identifier, "https://arxiv.org"),
+        title=title,
+        published_on=_date(entry.findtext(f"{atom}published"), checked_on),
+        checked_on=checked_on,
+        evidence_level="reference",
+        limitations=("arXiv preprint; peer-review status must be checked separately.",) + categories[:3],
+        abstract=_clean_text(entry.findtext(f"{atom}summary")),
+        authors=authors,
+    )
 
 
 def search_openalex(

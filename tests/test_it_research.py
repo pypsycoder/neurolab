@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from neurolab.it_research import (
     ItResearchError,
     ItResearchQuery,
+    lookup_arxiv_identifier,
     run_it_research,
 )
 from neurolab.research_corpus import CoveragePolicy, classify_item, evaluate_coverage, render_synthesis_status
@@ -90,3 +91,16 @@ class ItResearchPipelineTests(unittest.TestCase):
         self.assertEqual(coverage.status, "collecting_evidence")
         self.assertIn("need 1 more content-verified sources", coverage.unmet_requirements)
         self.assertIn("need reproducibility evidence for component and feature sources", coverage.unmet_requirements)
+
+    def test_targeted_arxiv_lookup_accepts_only_exact_modern_identifier(self):
+        def exact_transport(url: str, headers: dict[str, str]) -> bytes:
+            self.assertEqual(urlparse(url).hostname, "export.arxiv.org")
+            self.assertEqual(parse_qs(urlparse(url).query), {"id_list": ["2509.00001"]})
+            self.assertEqual(headers["User-Agent"], "neurolab-it-research/0.1")
+            return ARXIV.split(b"<entry>", 2)[0] + b"<entry>" + ARXIV.split(b"<entry>", 2)[1].split(b"</entry>", 1)[0] + b"</entry></feed>"
+
+        item = lookup_arxiv_identifier("2509.00001", transport=exact_transport)
+        self.assertEqual(item.provider_id, "2509.00001")
+        self.assertEqual(item.url, "https://arxiv.org/abs/2509.00001")
+        with self.assertRaises(ItResearchError):
+            lookup_arxiv_identifier("https://arxiv.org/abs/2509.00001", transport=exact_transport)
