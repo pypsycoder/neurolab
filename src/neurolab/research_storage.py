@@ -352,6 +352,11 @@ def persist_reviewed_claim(database_url: str, claim: ReviewedClaim) -> str:
                         json.dumps(list(claim.assessment.rationale)),
                     ),
                 )
+                if claim.assessment.assessor == "human":
+                    cursor.execute(
+                        "UPDATE it_research.sources SET verification_status = 'content_verified' WHERE source_key = %s",
+                        (claim.source_key,),
+                    )
     except ItResearchStorageError:
         raise
     except Exception as error:
