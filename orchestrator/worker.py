@@ -24,6 +24,7 @@ last_heartbeat_at = 0.0
 TASK_QUEUE = "neuro-lab:tasks"
 PROCESSING_QUEUE = "neuro-lab:tasks:processing"
 DEAD_LETTER_QUEUE = "neuro-lab:tasks:dead"
+VALID_CREDENTIAL_LANES = frozenset({"primary", "freemium"})
 TASK_LEASE_SECONDS = max(180, int(os.getenv("ORCHESTRATOR_TASK_LEASE_SECONDS", "900")))
 RECOVERY_INTERVAL_SECONDS = max(
     15, int(os.getenv("ORCHESTRATOR_RECOVERY_INTERVAL_SECONDS", "60"))
@@ -62,6 +63,18 @@ def safe_error_message(exc):
     if isinstance(exc, ProviderError):
         return str(exc)[:1000]
     return f"internal error: {type(exc).__name__}"
+
+
+def validate_payload(payload, *, require_task_id=False):
+    """Validate queue fields that would otherwise poison PostgreSQL recovery."""
+    if not isinstance(payload, dict):
+        raise ValueError("task payload must be an object")
+    lane = payload.get("credential_lane")
+    if lane is not None and lane not in VALID_CREDENTIAL_LANES:
+        raise ValueError("task payload has an unsupported credential lane")
+    if not require_task_id:
+        return None
+    return str(uuid.UUID(str(payload["task_id"])))
 
 
 class GigaChatClient:
@@ -368,6 +381,11 @@ def dead_letter_processing_delivery(raw_payload):
     )
 
 
+def acknowledge_processing_delivery(raw_payload):
+    """Remove a persisted terminal delivery left by a worker crash."""
+    return queue.lrem(PROCESSING_QUEUE, 1, raw_payload)
+
+
 def recover_stale_deliveries():
     """Recover processing deliveries without duplicating a provider call.
 
@@ -379,44 +397,60 @@ def recover_stale_deliveries():
     for raw_payload in queue.lrange(PROCESSING_QUEUE, 0, -1):
         try:
             payload = json.loads(raw_payload)
-            if not isinstance(payload, dict):
-                raise ValueError("task payload must be an object")
-            task_id = str(uuid.UUID(str(payload["task_id"])))
+            task_id = validate_payload(payload, require_task_id=True)
         except (TypeError, KeyError, ValueError, json.JSONDecodeError):
             if dead_letter_processing_delivery(raw_payload):
                 log.warning("moved malformed processing payload to dead-letter queue")
             continue
-        with psycopg.connect(db_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO tasks (id, status, provider, model, credential_lane, request_ref)
-                       VALUES (%s, 'queued', %s, %s, %s, %s)
-                       ON CONFLICT (id) DO NOTHING
-                       RETURNING id""",
-                    (
-                        task_id,
-                        payload.get("provider"),
-                        payload.get("model"),
-                        payload.get("credential_lane"),
-                        payload.get("request_ref"),
-                    ),
-                )
-                recovered = cur.fetchone() is not None
-                if not recovered:
+        try:
+            with psycopg.connect(db_url) as conn:
+                with conn.cursor() as cur:
                     cur.execute(
-                        """UPDATE tasks
-                           SET status='queued', started_at=NULL, execution_id=NULL
-                           WHERE id=%s AND (
-                               status='queued' OR
-                               (status='running' AND started_at < now() - make_interval(secs => %s))
-                           )
+                        """INSERT INTO tasks (id, status, provider, model, credential_lane, request_ref)
+                           VALUES (%s, 'queued', %s, %s, %s, %s)
+                           ON CONFLICT (id) DO NOTHING
                            RETURNING id""",
-                        (task_id, TASK_LEASE_SECONDS),
+                        (
+                            task_id,
+                            payload.get("provider"),
+                            payload.get("model"),
+                            payload.get("credential_lane"),
+                            payload.get("request_ref"),
+                        ),
                     )
                     recovered = cur.fetchone() is not None
-                conn.commit()
-        if recovered and requeue_stale_delivery(raw_payload):
-            log.warning("requeued recoverable processing delivery %s", task_id)
+                    if not recovered:
+                        cur.execute(
+                            """UPDATE tasks
+                               SET status='queued', started_at=NULL, execution_id=NULL
+                               WHERE id=%s AND (
+                                   status='queued' OR
+                                   (status='running' AND started_at < now() - make_interval(secs => %s))
+                               )
+                               RETURNING id""",
+                            (task_id, TASK_LEASE_SECONDS),
+                        )
+                        recovered = cur.fetchone() is not None
+                    terminal = False
+                    if not recovered:
+                        cur.execute("SELECT status FROM tasks WHERE id=%s", (task_id,))
+                        status_row = cur.fetchone()
+                        terminal = bool(status_row and status_row[0] in {"succeeded", "failed"})
+                    conn.commit()
+        except psycopg.Error as exc:
+            log.warning(
+                "could not inspect processing delivery %s (%s); continuing recovery",
+                task_id,
+                type(exc).__name__,
+            )
+            continue
+        try:
+            if recovered and requeue_stale_delivery(raw_payload):
+                log.warning("requeued recoverable processing delivery %s", task_id)
+            elif terminal and acknowledge_processing_delivery(raw_payload):
+                log.info("acknowledged persisted terminal delivery %s", task_id)
+        except redis.RedisError as exc:
+            log.warning("could not update processing delivery %s (%s)", task_id, type(exc).__name__)
 
 
 def handle_delivery(raw_payload):
@@ -428,8 +462,7 @@ def handle_delivery(raw_payload):
     """
     try:
         payload = json.loads(raw_payload)
-        if not isinstance(payload, dict):
-            raise ValueError("task payload must be an object")
+        validate_payload(payload)
     except (TypeError, ValueError, json.JSONDecodeError):
         queue.rpush(DEAD_LETTER_QUEUE, raw_payload)
         log.warning("moved malformed task payload to dead-letter queue")

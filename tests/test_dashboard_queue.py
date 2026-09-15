@@ -72,6 +72,10 @@ class DashboardQueueTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 429)
         self.dashboard.task_queue.rpush.assert_not_called()
 
+    def test_recent_task_serialization_uses_persisted_credential_lane(self):
+        row = ("00000000-0000-0000-0000-000000000007", None, None, "queued", "gigachat", "GigaChat-2-Pro", "synthetic", None, "freemium", {})
+        self.assertEqual(self.dashboard.serialize_row(row)["credential_lane"], "freemium")
+
 
 if __name__ == "__main__":
     unittest.main()

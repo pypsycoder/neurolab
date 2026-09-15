@@ -116,7 +116,7 @@ def record_enqueue_failure(task_id):
 
 
 def serialize_row(row):
-    result = row[8] or {}
+    result = row[9] or {}
     return {
         "id": str(row[0]),
         "created_at": row[1].isoformat() if row[1] else None,
@@ -126,6 +126,7 @@ def serialize_row(row):
         "model": row[5],
         "request_ref": row[6],
         "error": row[7],
+        "credential_lane": row[8],
         "result": result,
     }
 
@@ -135,7 +136,7 @@ def overview():
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT id, created_at, completed_at, status, provider, model, request_ref,
-                          error_message, result - 'embeddings'
+                          error_message, credential_lane, result - 'embeddings'
                    FROM tasks ORDER BY created_at DESC LIMIT 18"""
             )
             recent = [serialize_row(row) for row in cur.fetchall()]

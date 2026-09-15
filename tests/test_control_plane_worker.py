@@ -34,6 +34,10 @@ class FakeQueue:
         self.eval_call = (script, keys, args)
         return 1
 
+    def lrem(self, key, count, value):
+        self.lrem_call = (key, count, value)
+        return 1
+
 
 class FakeCursor:
     def __init__(self, rows):
@@ -127,6 +131,13 @@ class ControlPlaneWorkerTests(unittest.TestCase):
         self.assertTrue(self.worker.handle_delivery("not json"))
         self.assertEqual(fake_queue.pushed, [(self.worker.DEAD_LETTER_QUEUE, "not json")])
 
+    def test_semantically_invalid_lane_goes_to_dead_letter_without_db_access(self):
+        fake_queue = FakeQueue()
+        self.worker.queue = fake_queue
+
+        self.assertTrue(self.worker.handle_delivery('{"provider":"gigachat","credential_lane":"local"}'))
+        self.assertEqual(fake_queue.pushed, [(self.worker.DEAD_LETTER_QUEUE, '{"provider":"gigachat","credential_lane":"local"}')])
+
     def test_unexpected_exception_is_not_exposed_as_a_database_error(self):
         self.worker.heartbeat = Mock()
         self.worker.claim_task = Mock(return_value="00000000-0000-0000-0000-000000000002")
@@ -181,6 +192,38 @@ class ControlPlaneWorkerTests(unittest.TestCase):
             fake_queue.eval_call[2],
             (self.worker.PROCESSING_QUEUE, self.worker.DEAD_LETTER_QUEUE, "not json"),
         )
+
+    def test_recovery_acknowledges_terminal_processing_delivery(self):
+        raw_payload = '{"task_id":"00000000-0000-0000-0000-000000000004","provider":"local-smoke-test"}'
+        fake_queue = FakeQueue()
+        fake_queue.lrange = Mock(return_value=[raw_payload])
+        self.worker.queue = fake_queue
+        cursor = FakeCursor(rows=[None, None, ("succeeded",)])
+        connection = FakeConnection(cursor)
+        self.worker.acknowledge_processing_delivery = Mock(return_value=1)
+
+        with patch.object(self.worker.psycopg, "connect", return_value=connection):
+            self.worker.recover_stale_deliveries()
+
+        self.worker.acknowledge_processing_delivery.assert_called_once_with(raw_payload)
+
+    def test_recovery_continues_after_a_database_error(self):
+        first = '{"task_id":"00000000-0000-0000-0000-000000000005","provider":"local-smoke-test"}'
+        second = '{"task_id":"00000000-0000-0000-0000-000000000006","provider":"local-smoke-test"}'
+        fake_queue = FakeQueue()
+        fake_queue.lrange = Mock(return_value=[first, second])
+        self.worker.queue = fake_queue
+        connection = FakeConnection(FakeCursor(rows=[("00000000-0000-0000-0000-000000000006",)]))
+        self.worker.requeue_stale_delivery = Mock(return_value=1)
+
+        with patch.object(
+            self.worker.psycopg,
+            "connect",
+            side_effect=[self.worker.psycopg.Error("temporary database failure"), connection],
+        ):
+            self.worker.recover_stale_deliveries()
+
+        self.worker.requeue_stale_delivery.assert_called_once_with(second)
 
     def test_recovery_requeues_processing_delivery_without_a_database_claim(self):
         raw_payload = '{"task_id":"00000000-0000-0000-0000-000000000003","provider":"local-smoke-test"}'
