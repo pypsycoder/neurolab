@@ -8,8 +8,10 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from neurolab.claim_review import ReviewedClaim
 from neurolab.fulltext_verification import FullTextReceipt
 from neurolab.it_research import ItResearchRun, ResearchItem
+from neurolab.license_verification import LicenseReceipt
 from neurolab.research_corpus import CoverageAssessment, SourceAssessment, classify_item
 
 
@@ -254,3 +256,103 @@ def persist_fulltext_receipt(database_url: str, receipt: FullTextReceipt) -> str
     except Exception as error:
         raise ItResearchStorageError("full-text receipt persistence failed") from error
     return str(row[0])
+
+
+def persist_license_receipt(database_url: str, receipt: LicenseReceipt) -> str:
+    """Persist a licence proof digest, never the untrusted abstract-page HTML."""
+    psycopg = _require_psycopg()
+    receipt_id = str(uuid4())
+    try:
+        with psycopg.connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO it_research.license_receipts
+                        (id, source_key, provider, metadata_url, license_id, evidence_sha256, checked_on)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (source_key, license_id, evidence_sha256) DO UPDATE SET checked_on = EXCLUDED.checked_on
+                    RETURNING id
+                    """,
+                    (
+                        receipt_id,
+                        receipt.source_key,
+                        receipt.provider,
+                        receipt.metadata_url,
+                        receipt.license_id,
+                        receipt.evidence_sha256,
+                        receipt.checked_on,
+                    ),
+                )
+                row = cursor.fetchone()
+    except Exception as error:
+        raise ItResearchStorageError("licence receipt persistence failed") from error
+    return str(row[0])
+
+
+def persist_reviewed_claim(database_url: str, claim: ReviewedClaim) -> str:
+    """Write one reviewer-created, page-located claim and its separate score vector."""
+    psycopg = _require_psycopg()
+    claim_id = str(uuid4())
+    try:
+        with psycopg.connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT page_count FROM it_research.documents WHERE id = %s AND source_key = %s",
+                    (claim.document_id, claim.source_key),
+                )
+                document = cursor.fetchone()
+                if document is None or claim.page_end > document[0]:
+                    raise ItResearchStorageError("claim page location is not backed by its document receipt")
+                cursor.execute(
+                    """
+                    INSERT INTO it_research.claims
+                        (id, source_key, document_id, claim_summary, evidence_locator, maturity, action_lane, reviewer_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (document_id, claim_summary) DO UPDATE SET
+                        evidence_locator = EXCLUDED.evidence_locator,
+                        maturity = EXCLUDED.maturity,
+                        action_lane = EXCLUDED.action_lane,
+                        reviewer_status = EXCLUDED.reviewer_status
+                    RETURNING id
+                    """,
+                    (
+                        claim_id,
+                        claim.source_key,
+                        claim.document_id,
+                        claim.summary,
+                        claim.evidence_locator,
+                        claim.maturity,
+                        claim.action_lane,
+                        claim.reviewer_status,
+                    ),
+                )
+                existing = cursor.fetchone()
+                cursor.execute(
+                    """
+                    INSERT INTO it_research.claim_assessments
+                        (claim_id, assessor, conceptual_support, empirical_support, reproducibility,
+                         feasibility_now, source_independence, uncertainty, rationale)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    ON CONFLICT (claim_id) DO UPDATE SET
+                        assessed_at = now(), conceptual_support = EXCLUDED.conceptual_support,
+                        empirical_support = EXCLUDED.empirical_support, reproducibility = EXCLUDED.reproducibility,
+                        feasibility_now = EXCLUDED.feasibility_now, source_independence = EXCLUDED.source_independence,
+                        uncertainty = EXCLUDED.uncertainty, rationale = EXCLUDED.rationale
+                    """,
+                    (
+                        existing[0],
+                        claim.assessment.assessor,
+                        claim.assessment.conceptual_support,
+                        claim.assessment.empirical_support,
+                        claim.assessment.reproducibility,
+                        claim.assessment.feasibility_now,
+                        claim.assessment.source_independence,
+                        claim.assessment.uncertainty,
+                        json.dumps(list(claim.assessment.rationale)),
+                    ),
+                )
+    except ItResearchStorageError:
+        raise
+    except Exception as error:
+        raise ItResearchStorageError("reviewed claim persistence failed") from error
+    return str(existing[0])

@@ -127,3 +127,8 @@ docker compose --profile research run --rm --entrypoint python research \
 предоставляет проверенный license record для конкретного arXiv-документа.
 Такой документ должен сначала получить явную license-проверку, а затем
 отдельный reviewer создаёт claims с номером страницы и уровнем зрелости.
+
+Claim, созданный разрешённой моделью, хранится как `needs_review`; только
+человек может сделать его `reviewed`. Теоретическое утверждение разрешено
+сохранить с высоким conceptual support, но policy ограничивает его полосой
+`watchlist` или `research_experiment` до появления прототипа и проверки.
