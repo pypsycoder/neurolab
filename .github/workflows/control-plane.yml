@@ -1,0 +1,33 @@
+name: Control-plane checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  control-plane:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install control-plane test dependencies
+        run: python -m pip install -r orchestrator/requirements.txt -r dashboard/requirements.txt
+      - name: Run control-plane regression tests
+        run: python -m unittest -q tests.test_control_plane_worker tests.test_dashboard_queue
+      - name: Validate Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: Reject tracked local environment and obvious credential assignments
+        run: |
+          test -z "$(git ls-files -- .env .env.* | grep -v '^\.env\.example$')"
+          if git grep -nE '^(GIGACHAT_(KEY|CREDENTIALS)|POSTGRES_PASSWORD)=[^$[:space:]]+' -- ':!*.example'; then
+            echo 'A credential assignment appears in a tracked file.' >&2
+            exit 1
+          fi
