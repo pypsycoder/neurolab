@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # GigaChat is served with a certificate chain rooted in the Russian trusted CA.
 # Trust it only inside this workload; TLS verification remains enabled.
 RUN apk add --no-cache ca-certificates curl \
-    && curl --fail --silent --show-error --location --insecure \
+    && curl --fail --silent --show-error --location \
       https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt \
       --output /usr/local/share/ca-certificates/russian-trusted-root-ca.crt \
     && update-ca-certificates \
