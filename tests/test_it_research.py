@@ -9,6 +9,7 @@ from neurolab.it_research import (
     ItResearchError,
     ItResearchQuery,
     lookup_arxiv_identifier,
+    lookup_openalex_doi,
     run_it_research,
 )
 from neurolab.research_corpus import CoveragePolicy, classify_item, evaluate_coverage, render_synthesis_status
@@ -123,3 +124,25 @@ class ItResearchPipelineTests(unittest.TestCase):
         self.assertEqual(item.title, "Safe agent architecture")
         self.assertEqual(item.authors, ("Ada Example",))
         self.assertIn("fallback", item.limitations[1])
+
+    def test_targeted_openalex_lookup_accepts_only_exact_doi(self):
+        response = json.dumps({
+            "id": "https://openalex.org/W123",
+            "title": "Trustworthy agentic AI",
+            "publication_date": "2025-08-01",
+            "authorships": [],
+            "doi": "https://doi.org/10.12688/f1000research.169927.1",
+            "primary_location": {"landing_page_url": "https://f1000research.com/articles/14-905/v1"},
+        }).encode()
+
+        def exact_transport(url: str, headers: dict[str, str]) -> bytes:
+            self.assertEqual(urlparse(url).hostname, "api.openalex.org")
+            self.assertIn("https%3A%2F%2Fdoi.org%2F10.12688%2Ff1000research.169927.1", url)
+            self.assertEqual(headers["User-Agent"], "neurolab-it-research/0.1")
+            return response
+
+        item = lookup_openalex_doi("10.12688/f1000research.169927.1", transport=exact_transport)
+        self.assertEqual(item.provider_id, "W123")
+        self.assertEqual(item.url, "https://f1000research.com/articles/14-905/v1")
+        with self.assertRaises(ItResearchError):
+            lookup_openalex_doi("https://doi.org/10.12688/f1000research.169927.1", transport=exact_transport)

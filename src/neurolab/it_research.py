@@ -17,7 +17,7 @@ import json
 import re
 from typing import Literal
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from xml.etree import ElementTree
 
@@ -38,6 +38,7 @@ _PROVENANCE_URLS: dict[Provider, str] = {
 _MAX_RESPONSE_BYTES = 1_000_000
 _ARXIV_SCAN_RESULTS = 20
 _ARXIV_ID = re.compile(r"^\d{4}\.\d{4,5}(?:v\d+)?$")
+_DOI = re.compile(r"^10\.\d{4,9}/[-._;()/:a-z0-9]{1,180}$", re.IGNORECASE)
 _TOPIC = re.compile(r"^[^\r\n]{5,180}$")
 _TAG = re.compile(r"<[^>]+>")
 _TERM = re.compile(r"[a-z0-9][a-z0-9-]{2,}", re.IGNORECASE)
@@ -405,39 +406,65 @@ def search_openalex(
     results = envelope.get("results")
     if not isinstance(results, list):
         raise ItResearchError("OpenAlex results are invalid")
-    items: list[ResearchItem] = []
-    for result in results[: query.max_results_per_provider]:
-        if not isinstance(result, dict):
-            continue
-        provider_id = _clean_text(result.get("id"))
-        title = _clean_text(result.get("title"))
-        if not provider_id or not title:
-            continue
-        location = result.get("primary_location")
-        location_url = location.get("landing_page_url") if isinstance(location, dict) else None
-        openalex_url = _https_url(provider_id, "https://openalex.org")
-        authorships = result.get("authorships")
-        authors = tuple(
-            _clean_text(authorship.get("author", {}).get("display_name"))
-            for authorship in authorships if isinstance(authorship, dict)
-            and _clean_text(authorship.get("author", {}).get("display_name"))
-        ) if isinstance(authorships, list) else ()
-        items.append(
-            ResearchItem(
-                provider="openalex",
-                provider_id=provider_id.rsplit("/", 1)[-1],
-                url=_https_url(location_url, openalex_url),
-                title=title,
-                published_on=_date(result.get("publication_date"), checked_on),
-                checked_on=checked_on,
-                evidence_level="secondary",
-                limitations=("OpenAlex metadata; verify publisher record and full-text licence separately.",),
-                abstract="",
-                authors=authors,
-                doi=_clean_text(result.get("doi")) or None,
-            )
-        )
-    return tuple(items)
+    return tuple(
+        item
+        for result in results[: query.max_results_per_provider]
+        if isinstance(result, dict)
+        if (item := _openalex_item(result, checked_on)) is not None
+    )
+
+
+def _openalex_item(result: dict[str, object], checked_on: str) -> ResearchItem | None:
+    """Map one OpenAlex metadata object; never follow its location URL."""
+    provider_id = _clean_text(result.get("id"))
+    title = _clean_text(result.get("title"))
+    if not provider_id or not title:
+        return None
+    location = result.get("primary_location")
+    location_url = location.get("landing_page_url") if isinstance(location, dict) else None
+    openalex_url = _https_url(provider_id, "https://openalex.org")
+    authorships = result.get("authorships")
+    authors = tuple(
+        _clean_text(authorship.get("author", {}).get("display_name"))
+        for authorship in authorships if isinstance(authorship, dict)
+        and _clean_text(authorship.get("author", {}).get("display_name"))
+    ) if isinstance(authorships, list) else ()
+    return ResearchItem(
+        provider="openalex",
+        provider_id=provider_id.rsplit("/", 1)[-1],
+        url=_https_url(location_url, openalex_url),
+        title=title,
+        published_on=_date(result.get("publication_date"), checked_on),
+        checked_on=checked_on,
+        evidence_level="secondary",
+        limitations=("OpenAlex metadata; verify publisher record and full-text licence separately.",),
+        abstract="",
+        authors=authors,
+        doi=_clean_text(result.get("doi")) or None,
+    )
+
+
+def lookup_openalex_doi(
+    doi: str, *, api_key: str | None = None, transport: Transport = default_transport
+) -> ResearchItem:
+    """Retrieve one exact DOI record through a fixed OpenAlex API route.
+
+    The caller provides a DOI identifier, not a URL or free-text search.  This
+    adds public bibliographic metadata only and does not fetch the publisher
+    page, HTML, PDF, code, or supplementary files.
+    """
+    normalized_doi = doi.strip().casefold()
+    if not _DOI.fullmatch(normalized_doi):
+        raise ItResearchError("only a bounded DOI identifier is allowed")
+    headers = {"User-Agent": "neurolab-it-research/0.1"}
+    if api_key and api_key.strip():
+        headers["Authorization"] = f"Bearer {api_key.strip()}"
+    encoded_doi = quote(f"https://doi.org/{normalized_doi}", safe="")
+    payload = transport(f"https://api.openalex.org/works/{encoded_doi}", headers)
+    item = _openalex_item(_load_json(payload), _today())
+    if item is None or (item.doi or "").casefold().removeprefix("https://doi.org/") != normalized_doi:
+        raise ItResearchError("OpenAlex record does not match the requested DOI")
+    return item
 
 
 def search_crossref(

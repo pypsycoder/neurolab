@@ -94,3 +94,22 @@ PYTHONPATH=src runtime/langgraph-eval/bin/python scripts/verify_public_repositor
 human-reviewed claim, связанного с тем же source. Это поднимает качество
 reproducibility evidence, но не заменяет pinned-snapshot, независимый sandbox
 reproduction и отдельное ручное решение.
+
+Если конкретная работа уже отобрана вручную, её можно добавить в corpus через
+точный OpenAlex DOI lookup — без свободного поиска и без перехода по publisher
+URL:
+
+```bash
+PYTHONPATH=src runtime/langgraph-eval/bin/python scripts/import_openalex_doi_record.py \
+  --doi 10.12688/f1000research.169927.1 \
+  --topic "agentic system architecture evidence-gated research orchestration" \
+  --goal "Collect review-only public architecture evidence" --persist
+```
+
+Операционный запуск с `--persist` выполняется в существующем изолированном
+research container, которому передаётся `DATABASE_URL` только процессом
+Compose. Пока CLI не встроен в immutable research image, допустим только
+одноразовый read-only mount его versioned исходника; Dockerfile не следует
+править поверх чужих незакоммиченных изменений. Точечный importer принимает исключительно DOI и сверяет, что
+возвращённый OpenAlex DOI совпадает с запрошенным; запись остаётся
+`metadata_observed` до независимого ручного claim review.
