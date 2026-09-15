@@ -5,6 +5,7 @@ import unittest
 from urllib.parse import parse_qs, urlparse
 
 from neurolab.it_research import (
+    ArxivAbstractResponse,
     ItResearchError,
     ItResearchQuery,
     lookup_arxiv_identifier,
@@ -104,3 +105,21 @@ class ItResearchPipelineTests(unittest.TestCase):
         self.assertEqual(item.url, "https://arxiv.org/abs/2509.00001")
         with self.assertRaises(ItResearchError):
             lookup_arxiv_identifier("https://arxiv.org/abs/2509.00001", transport=exact_transport)
+
+    def test_targeted_lookup_has_one_official_metadata_fallback_after_atom_refusal(self):
+        def refused_transport(url: str, headers: dict[str, str]) -> bytes:
+            raise ItResearchError("synthetic Atom 429")
+
+        def metadata_transport(url: str) -> ArxivAbstractResponse:
+            self.assertEqual(url, "https://arxiv.org/abs/2509.00001")
+            return ArxivAbstractResponse(
+                "text/html",
+                b'<meta name="citation_title" content="Safe agent architecture"><meta name="citation_author" content="Ada Example"><meta name="citation_date" content="2025-09-15">',
+            )
+
+        item = lookup_arxiv_identifier(
+            "2509.00001", transport=refused_transport, fallback_transport=metadata_transport
+        )
+        self.assertEqual(item.title, "Safe agent architecture")
+        self.assertEqual(item.authors, ("Ada Example",))
+        self.assertIn("fallback", item.limitations[1])

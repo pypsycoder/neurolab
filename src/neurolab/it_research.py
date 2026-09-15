@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
+from html.parser import HTMLParser
 import json
 import re
 from typing import Literal
@@ -113,6 +114,17 @@ class ItResearchRun:
 Transport = Callable[[str, dict[str, str]], bytes]
 
 
+@dataclass(frozen=True)
+class ArxivAbstractResponse:
+    """Bounded metadata page used only after the Atom API declines one exact ID."""
+
+    content_type: str
+    payload: bytes
+
+
+ArxivAbstractTransport = Callable[[str], ArxivAbstractResponse]
+
+
 def _today() -> str:
     return datetime.now(UTC).date().isoformat()
 
@@ -145,6 +157,34 @@ def default_transport(url: str, headers: dict[str, str]) -> bytes:
     return payload
 
 
+def default_arxiv_abstract_transport(url: str) -> ArxivAbstractResponse:
+    """Fetch one fixed official arXiv abstract page with the same TLS limits."""
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "arxiv.org"
+        or parsed.username
+        or parsed.password
+        or parsed.port not in (None, 443)
+        or not re.fullmatch(r"/abs/\d{4}\.\d{4,5}(?:v\d+)?", parsed.path)
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ItResearchError("arXiv abstract target is outside the exact allowlist")
+    request = Request(url, headers={"User-Agent": "neurolab-it-research/0.1"}, method="GET")
+    try:
+        with build_opener(_RejectRedirects()).open(request, timeout=20) as response:
+            if response.geturl() != url:
+                raise ItResearchError("arXiv abstract location changed")
+            payload = response.read(_MAX_RESPONSE_BYTES + 1)
+            content_type = response.headers.get_content_type()
+    except (HTTPError, URLError, TimeoutError) as error:
+        raise ItResearchError("arXiv abstract request failed") from error
+    if len(payload) > _MAX_RESPONSE_BYTES or content_type not in {"text/html", "application/xhtml+xml"}:
+        raise ItResearchError("arXiv abstract response is invalid")
+    return ArxivAbstractResponse(content_type=content_type, payload=payload)
+
+
 def _clean_text(value: object, *, fallback: str = "") -> str:
     if not isinstance(value, str):
         return fallback
@@ -170,6 +210,61 @@ def _https_url(value: object, fallback: str) -> str:
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or port not in (None, 443):
         return fallback
     return url
+
+
+class _ArxivMetaParser(HTMLParser):
+    """Read a small fixed allowlist of arXiv citation metadata, not page content."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.title = ""
+        self.authors: list[str] = []
+        self.published_on = ""
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.casefold() != "meta":
+            return
+        values = {name.casefold(): value for name, value in attrs if value is not None}
+        name = values.get("name", "").casefold()
+        content = _clean_text(values.get("content"))
+        if name in {"citation_title", "dc.title"} and not self.title:
+            self.title = content
+        elif name == "citation_author" and content:
+            self.authors.append(content)
+        elif name in {"citation_date", "dc.date"} and not self.published_on:
+            self.published_on = content
+
+
+def _lookup_arxiv_abstract_page(arxiv_id: str, transport: ArxivAbstractTransport) -> ResearchItem:
+    url = f"https://arxiv.org/abs/{arxiv_id}"
+    response = transport(url)
+    if response.content_type not in {"text/html", "application/xhtml+xml"} or len(response.payload) > _MAX_RESPONSE_BYTES:
+        raise ItResearchError("arXiv abstract response is invalid")
+    try:
+        html = response.payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ItResearchError("arXiv abstract metadata is not UTF-8") from error
+    parser = _ArxivMetaParser()
+    parser.feed(html)
+    parser.close()
+    if not parser.title:
+        raise ItResearchError("arXiv abstract metadata has no title")
+    checked_on = _today()
+    return ResearchItem(
+        provider="arxiv",
+        provider_id=arxiv_id,
+        url=url,
+        title=parser.title,
+        published_on=_date(parser.published_on, checked_on),
+        checked_on=checked_on,
+        evidence_level="reference",
+        limitations=(
+            "arXiv preprint; peer-review status must be checked separately.",
+            "Exact arXiv abstract metadata fallback used after an Atom API refusal.",
+        ),
+        abstract="",
+        authors=tuple(parser.authors[:100]),
+    )
 
 
 def _load_json(payload: bytes) -> dict[str, object]:
@@ -235,7 +330,11 @@ def search_arxiv(query: ItResearchQuery, transport: Transport = default_transpor
     return tuple(sorted(items, key=lambda item: _title_relevance(item.title, query.topic), reverse=True)[: query.max_results_per_provider])
 
 
-def lookup_arxiv_identifier(arxiv_id: str, transport: Transport = default_transport) -> ResearchItem:
+def lookup_arxiv_identifier(
+    arxiv_id: str,
+    transport: Transport = default_transport,
+    fallback_transport: ArxivAbstractTransport = default_arxiv_abstract_transport,
+) -> ResearchItem:
     """Retrieve one exact modern arXiv record through the allowlisted Atom API.
 
     This is intentionally narrower than discovery search: callers supply only an
@@ -246,10 +345,16 @@ def lookup_arxiv_identifier(arxiv_id: str, transport: Transport = default_transp
     if not _ARXIV_ID.fullmatch(arxiv_id):
         raise ItResearchError("only modern arXiv identifiers are allowed")
     checked_on = _today()
-    payload = transport(
-        "https://export.arxiv.org/api/query?" + urlencode({"id_list": arxiv_id}),
-        {"User-Agent": "neurolab-it-research/0.1"},
-    )
+    try:
+        payload = transport(
+            "https://export.arxiv.org/api/query?" + urlencode({"id_list": arxiv_id}),
+            {"User-Agent": "neurolab-it-research/0.1"},
+        )
+    except ItResearchError:
+        # Perform one bounded alternate lookup, rather than retrying the
+        # rate-limited API. The fallback remains the fixed official page for
+        # exactly the same identifier.
+        return _lookup_arxiv_abstract_page(arxiv_id, fallback_transport)
     try:
         root = ElementTree.fromstring(payload)
     except ElementTree.ParseError as error:
