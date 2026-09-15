@@ -21,6 +21,7 @@ PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON_BIN" -m unittest -q \
     tests.test_fulltext_verification \
     tests.test_license_verification \
     tests.test_claim_review \
+    tests.test_artifact_verification \
   tests.test_agent_transitions \
   tests.test_agent_receipts \
   tests.test_architecture_smoke

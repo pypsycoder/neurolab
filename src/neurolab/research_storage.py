@@ -8,6 +8,7 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from neurolab.artifact_verification import PublicArtifactReceipt
 from neurolab.claim_review import ReviewedClaim
 from neurolab.fulltext_verification import FullTextReceipt
 from neurolab.it_research import ItResearchRun, ResearchItem
@@ -356,3 +357,51 @@ def persist_reviewed_claim(database_url: str, claim: ReviewedClaim) -> str:
     except Exception as error:
         raise ItResearchStorageError("reviewed claim persistence failed") from error
     return str(existing[0])
+
+
+def persist_public_artifact_receipt(database_url: str, receipt: PublicArtifactReceipt) -> str:
+    """Link bounded repository metadata only to a human-reviewed claim."""
+    psycopg = _require_psycopg()
+    receipt_id = str(uuid4())
+    try:
+        with psycopg.connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT 1 FROM it_research.claims WHERE id = %s AND source_key = %s AND reviewer_status = 'reviewed'",
+                    (receipt.claim_id, receipt.source_key),
+                )
+                if cursor.fetchone() is None:
+                    raise ItResearchStorageError("artifact must be linked to a human-reviewed claim")
+                cursor.execute(
+                    """
+                    INSERT INTO it_research.public_artifact_receipts
+                        (id, source_key, claim_id, repository, api_url, html_url, default_branch,
+                         code_license, evidence_sha256, has_readme, has_test_paths,
+                         has_environment_manifest, has_data_paths, verification_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (claim_id, repository, evidence_sha256) DO UPDATE SET checked_at = now()
+                    RETURNING id
+                    """,
+                    (
+                        receipt_id,
+                        receipt.source_key,
+                        receipt.claim_id,
+                        receipt.repository,
+                        receipt.api_url,
+                        receipt.html_url,
+                        receipt.default_branch,
+                        receipt.code_license,
+                        receipt.evidence_sha256,
+                        receipt.has_readme,
+                        receipt.has_test_paths,
+                        receipt.has_environment_manifest,
+                        receipt.has_data_paths,
+                        receipt.verification_status,
+                    ),
+                )
+                row = cursor.fetchone()
+    except ItResearchStorageError:
+        raise
+    except Exception as error:
+        raise ItResearchStorageError("public artifact receipt persistence failed") from error
+    return str(row[0])
