@@ -13,10 +13,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   error_message TEXT
 );
 
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS result JSONB;
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS execution_id UUID;
-ALTER TABLE tasks ADD COLUMN IF NOT EXISTS credential_lane TEXT;
-
 CREATE TABLE IF NOT EXISTS cost_events (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
@@ -31,3 +27,9 @@ CREATE TABLE IF NOT EXISTS cost_events (
 
 CREATE INDEX IF NOT EXISTS cost_events_task_id_idx ON cost_events(task_id);
 CREATE INDEX IF NOT EXISTS cost_events_recorded_at_idx ON cost_events(recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS worker_heartbeats (
+  worker_name TEXT PRIMARY KEY,
+  last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status TEXT NOT NULL DEFAULT 'idle'
+);

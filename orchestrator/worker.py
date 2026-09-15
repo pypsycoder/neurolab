@@ -319,21 +319,6 @@ def record_cost(task_id, provider, model, usage, credential_lane=None, amount_us
             conn.commit()
 
 
-def ensure_schema():
-    with psycopg.connect(db_url) as conn:
-        conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS result JSONB")
-        conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS execution_id UUID")
-        conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS credential_lane TEXT")
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS worker_heartbeats (
-                   worker_name TEXT PRIMARY KEY,
-                   last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
-                   status TEXT NOT NULL DEFAULT 'idle'
-               )"""
-        )
-        conn.commit()
-
-
 def heartbeat(status):
     global last_heartbeat_at
     if status == "idle" and time.time() - last_heartbeat_at < 30:
@@ -497,7 +482,6 @@ def handle_delivery(raw_payload):
 
 
 def run_worker():
-    ensure_schema()
     last_recovery_at = 0.0
     while True:
         if time.monotonic() - last_recovery_at >= RECOVERY_INTERVAL_SECONDS:

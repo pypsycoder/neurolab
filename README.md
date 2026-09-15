@@ -66,6 +66,8 @@ docker compose ps
 выполнить `./scripts/apply_migrations.sh --apply`, и только после этого
 пересоздавать worker/monitor. Скрипт не исполняет `.env` и ведёт в БД
 идемпотентный журнал применённых имён миграций.
+После migration 20260915_06 worker не выполняет runtime DDL: все изменения
+схемы должны поступать только через новый versioned migration.
 
 ## Проверка durable delivery
 
