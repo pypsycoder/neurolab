@@ -83,6 +83,18 @@ duplicate delivery, возврат просроченной execution lease и r
 останавливается, если уже обнаружил чужие просроченные `running` задания: такие
 задания требуют отдельного разбора, а не теста.
 
+Отдельная opt-in проверка crash/failover воспроизводит остановку worker после
+Redis BLMOVE, но до PostgreSQL claim:
+
+```bash
+./scripts/verify_control_plane_crash_failover_e2e.sh --apply
+```
+
+Она запускается только при пустых task/processing queues и отсутствии
+`running` задач. На время synthetic теста две постоянные worker-реплики
+останавливаются, а trap всегда возвращает их в количестве двух. Внешние API и
+credentials не используются.
+
 ## Web-панель
 
 После запуска dashboard доступен только локально на Pi по `http://127.0.0.1:8080`. Для безопасного удалённого доступа через tailnet включить Tailscale Serve и создать HTTPS proxy:
