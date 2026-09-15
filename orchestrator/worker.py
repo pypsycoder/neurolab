@@ -44,6 +44,12 @@ OUTBOX_CLAIM_SECONDS = max(
     30, int(os.getenv("ORCHESTRATOR_OUTBOX_CLAIM_SECONDS", "90"))
 )
 OUTBOX_BATCH_SIZE = max(1, int(os.getenv("ORCHESTRATOR_OUTBOX_BATCH_SIZE", "16")))
+OUTBOX_RETENTION_SECONDS = max(
+    3600, int(os.getenv("ORCHESTRATOR_OUTBOX_RETENTION_SECONDS", "604800"))
+)
+OUTBOX_CLEANUP_INTERVAL_SECONDS = max(
+    60, int(os.getenv("ORCHESTRATOR_OUTBOX_CLEANUP_INTERVAL_SECONDS", "3600"))
+)
 
 
 class ProviderError(RuntimeError):
@@ -463,6 +469,22 @@ def dispatch_pending_outbox():
                 log.warning("could not record outbox delivery error for task %s", task_id)
 
 
+def cleanup_terminal_outbox():
+    """Delete expired payloads only after their task has reached a final state."""
+    with psycopg.connect(db_url) as conn:
+        cursor = conn.execute(
+            """DELETE FROM task_outbox AS outbox
+               USING tasks
+               WHERE tasks.id=outbox.task_id
+                 AND tasks.status IN ('succeeded', 'failed')
+                 AND outbox.delivered_at IS NOT NULL
+                 AND outbox.delivered_at < now() - make_interval(secs => %s)""",
+            (OUTBOX_RETENTION_SECONDS,),
+        )
+        conn.commit()
+    return cursor.rowcount
+
+
 def requeue_stale_delivery(raw_payload):
     """Move one exact processing item back to the queue in one Redis script."""
     return queue.eval(
@@ -689,10 +711,19 @@ def handle_delivery(raw_payload):
 def run_worker():
     last_recovery_at = 0.0
     last_outbox_dispatch_at = 0.0
+    last_outbox_cleanup_at = 0.0
     while True:
         if time.monotonic() - last_outbox_dispatch_at >= OUTBOX_DISPATCH_INTERVAL_SECONDS:
             dispatch_pending_outbox()
             last_outbox_dispatch_at = time.monotonic()
+        if time.monotonic() - last_outbox_cleanup_at >= OUTBOX_CLEANUP_INTERVAL_SECONDS:
+            try:
+                removed = cleanup_terminal_outbox()
+                if removed:
+                    log.info("removed %s expired terminal outbox payloads", removed)
+            except psycopg.Error as exc:
+                log.warning("outbox cleanup failed (%s)", type(exc).__name__)
+            last_outbox_cleanup_at = time.monotonic()
         if time.monotonic() - last_recovery_at >= RECOVERY_INTERVAL_SECONDS:
             try:
                 recover_stale_deliveries()

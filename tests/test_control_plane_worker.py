@@ -4,7 +4,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -226,6 +226,20 @@ class ControlPlaneWorkerTests(unittest.TestCase):
             (self.worker.TASK_QUEUE, '{"task_id": "00000000-0000-0000-0000-000000000009", "provider": "local-smoke-test"}')
         ])
         self.worker.mark_outbox_delivered.assert_called_once_with(task_id, claim_id)
+
+    def test_terminal_outbox_cleanup_uses_configured_retention(self):
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.execute.return_value.rowcount = 2
+
+        with patch.object(self.worker.psycopg, "connect", return_value=connection):
+            self.assertEqual(self.worker.cleanup_terminal_outbox(), 2)
+
+        query, params = connection.execute.call_args.args
+        self.assertIn("DELETE FROM task_outbox", query)
+        self.assertIn("tasks.status IN ('succeeded', 'failed')", query)
+        self.assertEqual(params, (self.worker.OUTBOX_RETENTION_SECONDS,))
+        connection.commit.assert_called_once()
 
     def test_recovery_moves_exact_processing_payload_atomically(self):
         fake_queue = FakeQueue()
