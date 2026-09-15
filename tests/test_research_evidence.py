@@ -59,3 +59,12 @@ class ResearchEvidencePolicyTests(unittest.TestCase):
                     _source("src-beta", "https://example.org/b"),
                 )
             )
+
+    def test_long_bibliographic_title_is_bounded_without_rejecting_crossref_metadata(self):
+        accepted = replace(_source("src-alpha", "https://example.org/a"), title="A" * 217)
+        report = build_research_review_report((accepted, _source("src-beta", "https://example.net/b")))
+        self.assertEqual(report.citations[0].title, "A" * 217)
+
+        rejected = replace(_source("src-alpha", "https://example.org/a"), title="A" * 501)
+        with self.assertRaises(ResearchEvidencePolicyError):
+            build_research_review_report((rejected, _source("src-beta", "https://example.net/b")))

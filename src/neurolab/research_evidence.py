@@ -56,6 +56,10 @@ class ResearchReviewReport:
 
 _SOURCE_ID = re.compile(r"^src-[a-z0-9-]{3,64}$")
 _LEVELS: frozenset[str] = frozenset({"primary", "secondary", "reference"})
+# Bibliographic providers legitimately expose compound titles that exceed the
+# earlier 200-character UI-oriented limit.  Keep a bounded metadata ceiling so
+# a malformed provider response cannot become an unbounded prompt artifact.
+_MAX_TITLE_LENGTH = 500
 
 
 def _public_hostname(url: str) -> str:
@@ -94,7 +98,7 @@ def require_public_evidence(evidence: PublicSourceEvidence) -> None:
     if not _SOURCE_ID.fullmatch(evidence.source_id):
         raise ResearchEvidencePolicyError("source id is malformed")
     _public_hostname(evidence.url)
-    if not evidence.title.strip() or len(evidence.title) > 200:
+    if not evidence.title.strip() or len(evidence.title) > _MAX_TITLE_LENGTH:
         raise ResearchEvidencePolicyError("source title is missing or too long")
     published_on = _parse_iso_date(evidence.published_on, "published_on")
     checked_on = _parse_iso_date(evidence.checked_on, "checked_on")
