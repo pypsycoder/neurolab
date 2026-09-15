@@ -81,6 +81,8 @@ class FakeConnection:
 class ControlPlaneWorkerTests(unittest.TestCase):
     def setUp(self):
         self.worker = load_worker()
+        self.worker.record_provider_attempt = Mock()
+        self.worker.record_completion = Mock(return_value=True)
 
     def test_millisecond_expiry_is_normalized_and_refreshed_before_expiry(self):
         client = self.worker.GigaChatClient()
@@ -174,7 +176,7 @@ class ControlPlaneWorkerTests(unittest.TestCase):
         )
         self.worker.gigachat.complete.assert_not_called()
 
-    def test_provider_cost_is_recorded_even_when_completion_loses_lease(self):
+    def test_provider_completion_is_persisted_as_one_atomic_receipt(self):
         task_id = "00000000-0000-0000-0000-000000000001"
         execution_id = "00000000-0000-0000-0000-000000000002"
         self.worker.heartbeat = Mock()
@@ -184,18 +186,18 @@ class ControlPlaneWorkerTests(unittest.TestCase):
             "usage": {"prompt_tokens": 3, "completion_tokens": 2},
             "credential_lane": "primary",
         })
-        self.worker.record_cost = Mock()
-        self.worker.record_succeeded = Mock(return_value=False)
-
         self.assertTrue(self.worker.handle_delivery(
             '{"task_id":"%s","provider":"gigachat"}' % task_id
         ))
 
-        self.worker.record_cost.assert_called_once_with(
-            task_id, execution_id, "gigachat", "GigaChat-test",
+        self.worker.record_provider_attempt.assert_called_once_with(
+            task_id, execution_id, {"task_id": task_id, "provider": "gigachat"},
+        )
+        self.worker.record_completion.assert_called_once_with(
+            task_id, execution_id, "gigachat",
+            {"model": "GigaChat-test", "usage": {"prompt_tokens": 3, "completion_tokens": 2}, "credential_lane": "primary"},
             {"prompt_tokens": 3, "completion_tokens": 2}, "primary",
         )
-        self.worker.record_succeeded.assert_called_once()
 
     def test_delivery_task_ids_reads_both_durable_queues_and_ignores_bad_payloads(self):
         queued_id = "00000000-0000-0000-0000-000000000007"

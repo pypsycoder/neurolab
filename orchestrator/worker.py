@@ -303,6 +303,29 @@ def claim_task(task_id, payload):
                 ),
             )
             cur.execute(
+                """SELECT execution_id FROM provider_attempts
+                   WHERE task_id=%s AND status='inflight'
+                   ORDER BY started_at DESC LIMIT 1""",
+                (task_id,),
+            )
+            uncertain_attempt = cur.fetchone()
+            if uncertain_attempt:
+                cur.execute(
+                    """UPDATE tasks
+                       SET status='failed', completed_at=now(),
+                           error_message='Provider outcome is uncertain; automatic retry is blocked'
+                       WHERE id=%s AND status='queued'""",
+                    (task_id,),
+                )
+                cur.execute(
+                    """UPDATE provider_attempts
+                       SET status='outcome_unknown', concluded_at=now()
+                       WHERE task_id=%s AND execution_id=%s AND status='inflight'""",
+                    (task_id, uncertain_attempt[0]),
+                )
+                conn.commit()
+                return None
+            cur.execute(
                 """UPDATE tasks
                    SET status='running', started_at=now(), completed_at=NULL,
                        error_message=NULL, execution_id=%s
@@ -327,15 +350,76 @@ def record_succeeded(task_id, execution_id, result):
     return cursor.rowcount == 1
 
 
-def record_failed(task_id, execution_id, exc):
+def record_provider_attempt(task_id, execution_id, payload):
+    """Durably mark an external provider attempt before any network request."""
     with psycopg.connect(db_url) as conn:
-        cursor = conn.execute(
-            """UPDATE tasks SET status='failed', completed_at=now(), error_message=%s
-               WHERE id=%s AND status='running' AND execution_id=%s""",
-            (safe_error_message(exc), task_id, execution_id),
+        conn.execute(
+            """INSERT INTO provider_attempts
+               (task_id, execution_id, provider, model, credential_lane, status)
+               VALUES (%s, %s, %s, %s, %s, 'inflight')
+               ON CONFLICT (task_id, execution_id) DO NOTHING""",
+            (
+                task_id,
+                execution_id,
+                payload.get("provider"),
+                payload.get("model"),
+                payload.get("credential_lane"),
+            ),
         )
         conn.commit()
-    return cursor.rowcount == 1
+
+
+def record_completion(task_id, execution_id, provider, result, usage, credential_lane, amount_usd=None):
+    """Atomically save task result, attempt outcome, and its cost receipt."""
+    with psycopg.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO cost_events
+                   (task_id, execution_id, provider, model, input_tokens, output_tokens, amount_usd, raw_usage)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (task_id, execution_id)
+                   WHERE task_id IS NOT NULL AND execution_id IS NOT NULL DO NOTHING""",
+                (
+                    task_id, execution_id, provider, result.get("model"),
+                    usage.get("prompt_tokens", usage.get("input_tokens", usage.get("total_tokens"))),
+                    usage.get("completion_tokens", usage.get("output_tokens", 0)),
+                    amount_usd, json.dumps({"usage": usage, "credential_lane": credential_lane}),
+                ),
+            )
+            cur.execute(
+                """UPDATE tasks
+                   SET status='succeeded', completed_at=now(), model=COALESCE(%s, model), result=%s
+                   WHERE id=%s AND status='running' AND execution_id=%s""",
+                (result.get("model"), json.dumps(result), task_id, execution_id),
+            )
+            completed = cur.rowcount == 1
+            cur.execute(
+                """UPDATE provider_attempts
+                   SET status='completed', concluded_at=now()
+                   WHERE task_id=%s AND execution_id=%s AND status='inflight'""",
+                (task_id, execution_id),
+            )
+            conn.commit()
+    return completed
+
+
+def record_failed(task_id, execution_id, exc):
+    with psycopg.connect(db_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE tasks SET status='failed', completed_at=now(), error_message=%s
+                   WHERE id=%s AND status='running' AND execution_id=%s""",
+                (safe_error_message(exc), task_id, execution_id),
+            )
+            failed = cur.rowcount == 1
+            cur.execute(
+                """UPDATE provider_attempts
+                   SET status='failed', concluded_at=now(), error_message=%s
+                   WHERE task_id=%s AND execution_id=%s AND status='inflight'""",
+                (safe_error_message(exc), task_id, execution_id),
+            )
+        conn.commit()
+    return failed
 
 
 def record_cost(task_id, execution_id, provider, model, usage, credential_lane=None, amount_usd=None):
@@ -667,6 +751,7 @@ def handle_delivery(raw_payload):
         if execution_id is None:
             log.info("acknowledging duplicate or already-final task %s", task_id)
             return True
+        record_provider_attempt(task_id, execution_id, payload)
         if payload.get("provider") == "gigachat":
             operation = payload.get("operation", "chat")
             if operation == "chat":
@@ -675,15 +760,10 @@ def handle_delivery(raw_payload):
                 result = gigachat.embed(payload)
             else:
                 raise ProviderError(f"unsupported GigaChat operation: {operation}")
-            # The provider response is a real external spend even if the task
-            # status update later loses its lease race.  Receipt uniqueness is
-            # scoped to this execution lease, so a retry cannot double-count it.
-            record_cost(task_id, execution_id, "gigachat", result["model"], result["usage"], result["credential_lane"])
-            record_succeeded(task_id, execution_id, result)
+            record_completion(task_id, execution_id, "gigachat", result, result["usage"], result["credential_lane"])
         elif payload.get("provider") == "local-smoke-test":
             result = {"model": payload.get("model"), "content": None, "credential_lane": "local"}
-            record_cost(task_id, execution_id, "local-smoke-test", payload.get("model"), payload.get("usage", {}), "local", payload.get("amount_usd", 0))
-            record_succeeded(task_id, execution_id, result)
+            record_completion(task_id, execution_id, "local-smoke-test", result, payload.get("usage", {}), "local", payload.get("amount_usd", 0))
         else:
             raise ProviderError(f"unsupported provider: {payload.get('provider')}")
         log.info("recorded task %s", task_id)

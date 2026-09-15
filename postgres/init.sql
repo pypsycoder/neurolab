@@ -32,6 +32,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS cost_events_task_execution_unique
   ON cost_events(task_id, execution_id)
   WHERE task_id IS NOT NULL AND execution_id IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS provider_attempts (
+  task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  execution_id UUID NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT,
+  credential_lane TEXT,
+  status TEXT NOT NULL CHECK (status IN ('inflight', 'completed', 'failed', 'outcome_unknown')),
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  concluded_at TIMESTAMPTZ,
+  error_message TEXT,
+  PRIMARY KEY (task_id, execution_id)
+);
+
+CREATE INDEX IF NOT EXISTS provider_attempts_inflight_idx
+  ON provider_attempts(task_id, started_at DESC)
+  WHERE status='inflight';
+
 CREATE TABLE IF NOT EXISTS task_outbox (
   task_id UUID PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
   payload JSONB NOT NULL,
