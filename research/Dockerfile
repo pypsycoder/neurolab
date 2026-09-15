@@ -8,6 +8,8 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY --chown=researcher:researcher src /app/src
 COPY --chown=researcher:researcher scripts/run_it_research.py /app/scripts/run_it_research.py
+COPY --chown=researcher:researcher scripts/verify_open_access_pdf.py /app/scripts/verify_open_access_pdf.py
+COPY --chown=researcher:researcher research/test_pdf_contract.py /app/tests/test_pdf_contract.py
 
 USER researcher
 ENV PYTHONPATH=/app/src

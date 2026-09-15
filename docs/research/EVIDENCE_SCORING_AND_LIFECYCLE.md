@@ -108,3 +108,22 @@ arXiv либо другой явно открытый архив). Publisher PDF
 отдельной retention/access policy; в основной research БД остаются хеш,
 лицензия, ссылка и структурированные claims. Никакие clinical/patient данные
 в этот контур не добавляются.
+
+Первый реализованный verifier принимает только modern arXiv ID, уже найденный
+`source_key` и явную совместимую лицензию (`CC-BY-4.0`, `CC0-1.0` или
+`PUBLIC-DOMAIN`). Он не принимает URL из аргумента. Переходы, иной MIME-тип,
+не-PDF подпись, размер больше 25 MiB, более 100 страниц и текст более
+1 000 000 символов означают отказ. После успешного extraction сохраняется
+только receipt; PDF и raw text не удерживаются. Запуск остаётся ручным и
+одноразовым:
+
+```bash
+docker compose --profile research run --rm --entrypoint python research \
+  /app/scripts/verify_open_access_pdf.py \
+  --source-key <64-char-source-key> --arxiv-id <id> --license CC-BY-4.0 --persist
+```
+
+На этом этапе автоматического full-text запуска нет: discovery ещё не
+предоставляет проверенный license record для конкретного arXiv-документа.
+Такой документ должен сначала получить явную license-проверку, а затем
+отдельный reviewer создаёт claims с номером страницы и уровнем зрелости.

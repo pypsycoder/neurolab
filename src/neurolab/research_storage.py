@@ -8,6 +8,7 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from neurolab.fulltext_verification import FullTextReceipt
 from neurolab.it_research import ItResearchRun, ResearchItem
 from neurolab.research_corpus import CoverageAssessment, SourceAssessment, classify_item
 
@@ -215,3 +216,41 @@ def record_synthesis_status(database_url: str, coverage: CoverageAssessment, *, 
     except Exception as error:
         raise ItResearchStorageError("research synthesis receipt persistence failed") from error
     return synthesis_id
+
+
+def persist_fulltext_receipt(database_url: str, receipt: FullTextReceipt) -> str:
+    """Persist only a legal open-access document receipt, never its PDF/text bytes."""
+    psycopg = _require_psycopg()
+    document_id = str(uuid4())
+    try:
+        with psycopg.connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO it_research.documents
+                        (id, source_key, provider, document_url, license_id, pdf_sha256,
+                         byte_count, page_count, extracted_text_sha256,
+                         extracted_character_count, extraction_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (source_key, pdf_sha256) DO UPDATE SET
+                        acquired_at = now(), extraction_status = EXCLUDED.extraction_status
+                    RETURNING id
+                    """,
+                    (
+                        document_id,
+                        receipt.source_key,
+                        receipt.provider,
+                        receipt.document_url,
+                        receipt.license_id,
+                        receipt.sha256,
+                        receipt.byte_count,
+                        receipt.page_count,
+                        receipt.extracted_text_sha256,
+                        receipt.extracted_character_count,
+                        receipt.extraction_status,
+                    ),
+                )
+                row = cursor.fetchone()
+    except Exception as error:
+        raise ItResearchStorageError("full-text receipt persistence failed") from error
+    return str(row[0])
