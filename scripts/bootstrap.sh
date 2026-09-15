@@ -8,7 +8,7 @@ docker compose version >/dev/null || { echo "Docker Compose plugin unavailable; 
 
 if $apply; then
   sudo install -d -m 0750 /opt/neuro-lab /opt/neuro-lab/inventory
-  sudo install -d -m 0750 /srv/neuro-lab/logs /srv/neuro-lab/cache /srv/neuro-lab/artifacts
+  sudo install -d -m 0750 /srv/neuro-lab/logs /srv/neuro-lab/cache /srv/neuro-lab/artifacts /srv/neuro-lab/backups
   echo "Directories prepared. Create /opt/neuro-lab/.env from .env.example before starting services."
 else
   cat <<'EOF'

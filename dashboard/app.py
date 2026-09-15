@@ -20,6 +20,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 REDIS_URL = os.environ["REDIS_URL"]
 REFRESH_SECONDS = int(os.getenv("PANEL_REFRESH_SECONDS", "10"))
 TASK_QUEUE = "neuro-lab:tasks"
+MAX_QUEUE_DEPTH = max(1, int(os.getenv("DASHBOARD_MAX_QUEUE_DEPTH", "100")))
 CHAT_MODELS = (
     "GigaChat-2",
     "GigaChat-2-Max",
@@ -50,7 +51,10 @@ def read_first_line(path):
 
 def host_metrics():
     load_text = read_first_line("/host/proc/loadavg")
-    memory_text = Path("/host/proc/meminfo").read_text(encoding="utf-8")
+    try:
+        memory_text = Path("/host/proc/meminfo").read_text(encoding="utf-8")
+    except (FileNotFoundError, PermissionError, OSError):
+        memory_text = ""
     memory = {}
     for line in memory_text.splitlines():
         key, value = line.split(":", 1)
@@ -65,6 +69,29 @@ def host_metrics():
         "disk_total": disk.total,
         "disk_free": disk.free,
     }
+
+
+def record_queued_task(task_id, payload):
+    """Persist the dashboard-visible queued state before delivery to Redis."""
+    with psycopg.connect(DATABASE_URL) as conn:
+        conn.execute(
+            """INSERT INTO tasks (id, status, provider, model, request_ref)
+               VALUES (%s, 'queued', %s, %s, %s)
+               ON CONFLICT (id) DO NOTHING""",
+            (task_id, payload["provider"], payload["model"], payload["request_ref"]),
+        )
+        conn.commit()
+
+
+def record_enqueue_failure(task_id):
+    with psycopg.connect(DATABASE_URL) as conn:
+        conn.execute(
+            """UPDATE tasks SET status='failed', completed_at=now(),
+               error_message='Task queue is unavailable before delivery'
+               WHERE id=%s AND status='queued'""",
+            (task_id,),
+        )
+        conn.commit()
 
 
 def serialize_row(row):
@@ -185,7 +212,16 @@ def create_task(request: TaskRequest):
         "request_ref": f"dashboard-{int(time.time())}",
     }
     try:
+        if task_queue.llen(TASK_QUEUE) >= MAX_QUEUE_DEPTH:
+            raise HTTPException(status_code=429, detail="Task queue is at its safe capacity")
+        record_queued_task(task_id, payload)
         task_queue.rpush(TASK_QUEUE, json.dumps(payload, ensure_ascii=False))
     except redis.RedisError as exc:
+        try:
+            record_enqueue_failure(task_id)
+        except psycopg.Error:
+            pass
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from exc
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=503, detail="Task state is unavailable") from exc
     return {"task_id": task_id, "status": "queued"}
