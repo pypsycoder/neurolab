@@ -304,7 +304,9 @@ def persist_publisher_html_receipt(database_url: str, receipt: PublisherHtmlRece
                         (id, source_key, provider, document_url, license_id, html_sha256,
                          visible_text_sha256, visible_character_count, checked_on, verification_status)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (source_key, html_sha256) DO UPDATE SET checked_on = EXCLUDED.checked_on
+                    ON CONFLICT (source_key, visible_text_sha256) DO UPDATE SET
+                        checked_on = EXCLUDED.checked_on,
+                        html_sha256 = EXCLUDED.html_sha256
                     RETURNING id
                     """,
                     (

@@ -79,6 +79,9 @@ PYTHONPATH=src runtime/langgraph-eval/bin/python scripts/run_f1000_html_evidence
 получает receipt: хеш HTML, хеш видимого текста, длину, лицензию и дату — без
 HTML, excerpt, prompt или автоматически созданного claim. Даже успешный
 receipt не делает источник `content_verified` и не открывает Code-agent ТЗ.
+HTML-хеш может меняться из-за служебной разметки страницы; дедупликация receipt
+основана на нормализованном видимом тексте, а технический HTML-хеш обновляется
+до последнего наблюдения.
 
 Для публичной реализации существует отдельный GitHub metadata route:
 
@@ -108,8 +111,7 @@ PYTHONPATH=src runtime/langgraph-eval/bin/python scripts/import_openalex_doi_rec
 
 Операционный запуск с `--persist` выполняется в существующем изолированном
 research container, которому передаётся `DATABASE_URL` только процессом
-Compose. Пока CLI не встроен в immutable research image, допустим только
-одноразовый read-only mount его versioned исходника; Dockerfile не следует
-править поверх чужих незакоммиченных изменений. Точечный importer принимает исключительно DOI и сверяет, что
+Compose. CLI встроен в immutable research image; при изменении нужно
+пересобрать образ и не использовать writeable source mount. Точечный importer принимает исключительно DOI и сверяет, что
 возвращённый OpenAlex DOI совпадает с запрошенным; запись остаётся
 `metadata_observed` до независимого ручного claim review.
