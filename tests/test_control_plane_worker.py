@@ -35,6 +35,42 @@ class FakeQueue:
         return 1
 
 
+class FakeCursor:
+    def __init__(self, rows):
+        self.rows = iter(rows)
+        self.queries = []
+
+    def execute(self, query, params):
+        self.queries.append((query, params))
+
+    def fetchone(self):
+        return next(self.rows)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *unused):
+        return False
+
+
+class FakeConnection:
+    def __init__(self, cursor):
+        self.cursor_value = cursor
+        self.committed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *unused):
+        return False
+
+    def cursor(self):
+        return self.cursor_value
+
+    def commit(self):
+        self.committed = True
+
+
 class ControlPlaneWorkerTests(unittest.TestCase):
     def setUp(self):
         self.worker = load_worker()
@@ -134,6 +170,33 @@ class ControlPlaneWorkerTests(unittest.TestCase):
             fake_queue.eval_call[2],
             (self.worker.PROCESSING_QUEUE, self.worker.TASK_QUEUE, '{"task_id":"id"}'),
         )
+
+    def test_recovery_dead_letters_malformed_processing_payload(self):
+        fake_queue = FakeQueue()
+        self.worker.queue = fake_queue
+
+        self.assertEqual(self.worker.dead_letter_processing_delivery("not json"), 1)
+        self.assertEqual(fake_queue.eval_call[1], 2)
+        self.assertEqual(
+            fake_queue.eval_call[2],
+            (self.worker.PROCESSING_QUEUE, self.worker.DEAD_LETTER_QUEUE, "not json"),
+        )
+
+    def test_recovery_requeues_processing_delivery_without_a_database_claim(self):
+        raw_payload = '{"task_id":"00000000-0000-0000-0000-000000000003","provider":"local-smoke-test"}'
+        fake_queue = FakeQueue()
+        fake_queue.lrange = Mock(return_value=[raw_payload])
+        self.worker.queue = fake_queue
+        cursor = FakeCursor(rows=[("00000000-0000-0000-0000-000000000003",)])
+        connection = FakeConnection(cursor)
+        self.worker.requeue_stale_delivery = Mock(return_value=1)
+
+        with patch.object(self.worker.psycopg, "connect", return_value=connection):
+            self.worker.recover_stale_deliveries()
+
+        self.assertTrue(connection.committed)
+        self.assertIn("INSERT INTO tasks", cursor.queries[0][0])
+        self.worker.requeue_stale_delivery.assert_called_once_with(raw_payload)
 
 
 if __name__ == "__main__":

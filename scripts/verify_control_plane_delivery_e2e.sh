@@ -9,7 +9,7 @@ set -euo pipefail
 
 if [[ "${1:-}" != "--apply" || $# -ne 1 ]]; then
   echo "Usage: $0 --apply" >&2
-  echo "Creates two retained synthetic tasks to verify duplicate delivery and lease recovery." >&2
+  echo "Creates three retained synthetic tasks to verify durable delivery recovery." >&2
   exit 2
 fi
 
@@ -95,4 +95,14 @@ wait_for "$stale_id" 'succeeded|1|1'
 replaced_lease="$(scalar "SELECT (execution_id <> '$stale_execution_id'::uuid)::int FROM tasks WHERE id='$stale_id'::uuid;")"
 [[ "$replaced_lease" == "1" ]] || fail "stale task retained its old execution lease"
 
-echo "Control-plane delivery E2E passed: duplicate delivery and expired lease recovery."
+unclaimed_id="$(new_uuid)"
+unclaimed_payload="{\"task_id\":\"$unclaimed_id\",\"provider\":\"local-smoke-test\",\"model\":\"unclaimed-recovery-e2e\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0},\"amount_usd\":0}"
+
+# This mimics a worker crash after BLMOVE but before PostgreSQL claim_task.
+# Recovery must create a queued row, atomically return the raw payload, and
+# let a worker process it once.
+enqueue 'neuro-lab:tasks:processing' "$unclaimed_payload"
+docker compose exec -T orchestrator python -c 'import worker; worker.recover_stale_deliveries()' >/dev/null
+wait_for "$unclaimed_id" 'succeeded|1|1'
+
+echo "Control-plane delivery E2E passed: duplicate, expired lease, and unclaimed processing recovery."

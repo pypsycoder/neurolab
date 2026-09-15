@@ -76,11 +76,12 @@ docker compose ps
 ./scripts/verify_control_plane_delivery_e2e.sh --apply
 ```
 
-Она не читает `.env`, не вызывает GigaChat и создаёт только два новых
+Она не читает `.env`, не вызывает GigaChat и создаёт только три новых
 synthetic `local-smoke-test` задания. Проверяются exactly-one cost event при
-duplicate delivery и возврат просроченной execution lease из processing queue.
-Перед recovery скрипт останавливается, если уже обнаружил чужие просроченные
-`running` задания: такие задания требуют отдельного разбора, а не теста.
+duplicate delivery, возврат просроченной execution lease и recovery сообщения,
+которое попало в processing queue до PostgreSQL claim. Перед recovery скрипт
+останавливается, если уже обнаружил чужие просроченные `running` задания: такие
+задания требуют отдельного разбора, а не теста.
 
 ## Web-панель
 

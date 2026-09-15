@@ -368,28 +368,70 @@ def requeue_stale_delivery(raw_payload):
     )
 
 
+def dead_letter_processing_delivery(raw_payload):
+    """Atomically remove an invalid processing delivery into dead-letter."""
+    return queue.eval(
+        """if redis.call('LREM', KEYS[1], 1, ARGV[1]) == 1 then
+              redis.call('RPUSH', KEYS[2], ARGV[1])
+              return 1
+            end
+            return 0""",
+        2,
+        PROCESSING_QUEUE,
+        DEAD_LETTER_QUEUE,
+        raw_payload,
+    )
+
+
 def recover_stale_deliveries():
-    """Requeue expired leases; never reclaim a currently valid execution."""
+    """Recover processing deliveries without duplicating a provider call.
+
+    A worker can die after Redis moves a raw message into ``processing`` but
+    before it claims the PostgreSQL row.  Such a delivery has no lease to age.
+    It is safe to create/requeue a ``queued`` row: a later simultaneous claim
+    is atomic and therefore cannot result in a second provider invocation.
+    """
     for raw_payload in queue.lrange(PROCESSING_QUEUE, 0, -1):
         try:
             payload = json.loads(raw_payload)
-            task_id = payload["task_id"]
+            if not isinstance(payload, dict):
+                raise ValueError("task payload must be an object")
+            task_id = str(uuid.UUID(str(payload["task_id"])))
         except (TypeError, KeyError, ValueError, json.JSONDecodeError):
+            if dead_letter_processing_delivery(raw_payload):
+                log.warning("moved malformed processing payload to dead-letter queue")
             continue
         with psycopg.connect(db_url) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """UPDATE tasks
-                       SET status='queued', started_at=NULL, execution_id=NULL
-                       WHERE id=%s AND status='running'
-                         AND started_at < now() - make_interval(secs => %s)
+                    """INSERT INTO tasks (id, status, provider, model, credential_lane, request_ref)
+                       VALUES (%s, 'queued', %s, %s, %s, %s)
+                       ON CONFLICT (id) DO NOTHING
                        RETURNING id""",
-                    (task_id, TASK_LEASE_SECONDS),
+                    (
+                        task_id,
+                        payload.get("provider"),
+                        payload.get("model"),
+                        payload.get("credential_lane"),
+                        payload.get("request_ref"),
+                    ),
                 )
                 recovered = cur.fetchone() is not None
+                if not recovered:
+                    cur.execute(
+                        """UPDATE tasks
+                           SET status='queued', started_at=NULL, execution_id=NULL
+                           WHERE id=%s AND (
+                               status='queued' OR
+                               (status='running' AND started_at < now() - make_interval(secs => %s))
+                           )
+                           RETURNING id""",
+                        (task_id, TASK_LEASE_SECONDS),
+                    )
+                    recovered = cur.fetchone() is not None
                 conn.commit()
         if recovered and requeue_stale_delivery(raw_payload):
-            log.warning("requeued expired task lease %s", task_id)
+            log.warning("requeued recoverable processing delivery %s", task_id)
 
 
 def handle_delivery(raw_payload):
