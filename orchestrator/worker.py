@@ -29,6 +29,13 @@ TASK_LEASE_SECONDS = max(180, int(os.getenv("ORCHESTRATOR_TASK_LEASE_SECONDS", "
 RECOVERY_INTERVAL_SECONDS = max(
     15, int(os.getenv("ORCHESTRATOR_RECOVERY_INTERVAL_SECONDS", "60"))
 )
+# A dashboard process can theoretically stop after committing the task row but
+# before RPUSH.  Do not treat a brief queue delay as an orphan: this is only a
+# bounded repair for rows that have been absent from both durable Redis lists
+# for a long time.  A production outbox remains the future stronger solution.
+ORPHANED_QUEUED_SECONDS = max(
+    300, int(os.getenv("ORCHESTRATOR_ORPHANED_QUEUED_SECONDS", "1800"))
+)
 
 
 class ProviderError(RuntimeError):
@@ -317,14 +324,17 @@ def record_failed(task_id, execution_id, exc):
     return cursor.rowcount == 1
 
 
-def record_cost(task_id, provider, model, usage, credential_lane=None, amount_usd=None):
+def record_cost(task_id, execution_id, provider, model, usage, credential_lane=None, amount_usd=None):
+    """Persist one cost receipt for one concrete provider execution lease."""
     with psycopg.connect(db_url) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO cost_events
-                   (task_id, provider, model, input_tokens, output_tokens, amount_usd, raw_usage)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                (task_id, provider, model,
+                   (task_id, execution_id, provider, model, input_tokens, output_tokens, amount_usd, raw_usage)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (task_id, execution_id)
+                   WHERE task_id IS NOT NULL AND execution_id IS NOT NULL DO NOTHING""",
+                (task_id, execution_id, provider, model,
                  usage.get("prompt_tokens", usage.get("input_tokens", usage.get("total_tokens"))),
                  usage.get("completion_tokens", usage.get("output_tokens", 0)),
                  amount_usd, json.dumps({"usage": usage, "credential_lane": credential_lane})),
@@ -384,6 +394,63 @@ def dead_letter_processing_delivery(raw_payload):
 def acknowledge_processing_delivery(raw_payload):
     """Remove a persisted terminal delivery left by a worker crash."""
     return queue.lrem(PROCESSING_QUEUE, 1, raw_payload)
+
+
+def delivery_task_ids():
+    """Return valid task IDs currently observed in either durable Redis list.
+
+    Malformed entries intentionally do not protect a task row: normal recovery
+    will move those entries to dead-letter instead of executing them.
+    """
+    task_ids = set()
+    for queue_name in (TASK_QUEUE, PROCESSING_QUEUE):
+        for raw_payload in queue.lrange(queue_name, 0, -1):
+            try:
+                payload = json.loads(raw_payload)
+                task_ids.add(validate_payload(payload, require_task_id=True))
+            except (TypeError, KeyError, ValueError, json.JSONDecodeError):
+                continue
+    return task_ids
+
+
+def reap_orphaned_queued_tasks():
+    """Fail long-lived queued rows whose raw delivery is absent from Redis.
+
+    This deliberately does not reconstruct or requeue a request because prompt
+    content is not stored in PostgreSQL.  The bounded repair makes a failed
+    dispatch visible and allows the user to submit a fresh request.
+    """
+    try:
+        observed_task_ids = delivery_task_ids()
+    except redis.RedisError as exc:
+        log.warning("could not inspect delivery queues for queued reaper (%s)", type(exc).__name__)
+        return
+    try:
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id FROM tasks
+                       WHERE status='queued'
+                         AND created_at < now() - make_interval(secs => %s)""",
+                    (ORPHANED_QUEUED_SECONDS,),
+                )
+                candidates = [str(row[0]) for row in cur.fetchall()]
+                for task_id in candidates:
+                    if task_id in observed_task_ids:
+                        continue
+                    cur.execute(
+                        """UPDATE tasks
+                           SET status='failed', completed_at=now(),
+                               error_message='Task delivery was not observed before queue timeout'
+                           WHERE id=%s AND status='queued'
+                             AND created_at < now() - make_interval(secs => %s)""",
+                        (task_id, ORPHANED_QUEUED_SECONDS),
+                    )
+                    if cur.rowcount == 1:
+                        log.warning("marked orphaned queued task as failed %s", task_id)
+                conn.commit()
+    except psycopg.Error as exc:
+        log.warning("queued-task reaper failed (%s)", type(exc).__name__)
 
 
 def recover_stale_deliveries():
@@ -484,12 +551,15 @@ def handle_delivery(raw_payload):
                 result = gigachat.embed(payload)
             else:
                 raise ProviderError(f"unsupported GigaChat operation: {operation}")
-            if record_succeeded(task_id, execution_id, result):
-                record_cost(task_id, "gigachat", result["model"], result["usage"], result["credential_lane"])
+            # The provider response is a real external spend even if the task
+            # status update later loses its lease race.  Receipt uniqueness is
+            # scoped to this execution lease, so a retry cannot double-count it.
+            record_cost(task_id, execution_id, "gigachat", result["model"], result["usage"], result["credential_lane"])
+            record_succeeded(task_id, execution_id, result)
         elif payload.get("provider") == "local-smoke-test":
             result = {"model": payload.get("model"), "content": None, "credential_lane": "local"}
-            if record_succeeded(task_id, execution_id, result):
-                record_cost(task_id, "local-smoke-test", payload.get("model"), payload.get("usage", {}), "local", payload.get("amount_usd", 0))
+            record_cost(task_id, execution_id, "local-smoke-test", payload.get("model"), payload.get("usage", {}), "local", payload.get("amount_usd", 0))
+            record_succeeded(task_id, execution_id, result)
         else:
             raise ProviderError(f"unsupported provider: {payload.get('provider')}")
         log.info("recorded task %s", task_id)
@@ -522,6 +592,10 @@ def run_worker():
                 recover_stale_deliveries()
             except Exception:
                 log.error("processing-queue recovery failed; deliveries retained")
+            try:
+                reap_orphaned_queued_tasks()
+            except Exception:
+                log.error("queued-task reaper failed; queued rows retained")
             last_recovery_at = time.monotonic()
         heartbeat("idle")
         raw_payload = queue.blmove(

@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS cost_events (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+  execution_id UUID,
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   provider TEXT NOT NULL,
   model TEXT,
@@ -27,6 +28,9 @@ CREATE TABLE IF NOT EXISTS cost_events (
 
 CREATE INDEX IF NOT EXISTS cost_events_task_id_idx ON cost_events(task_id);
 CREATE INDEX IF NOT EXISTS cost_events_recorded_at_idx ON cost_events(recorded_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS cost_events_task_execution_unique
+  ON cost_events(task_id, execution_id)
+  WHERE task_id IS NOT NULL AND execution_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS worker_heartbeats (
   worker_name TEXT PRIMARY KEY,

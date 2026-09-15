@@ -38,6 +38,9 @@ class FakeQueue:
         self.lrem_call = (key, count, value)
         return 1
 
+    def lrange(self, key, start, end):
+        return []
+
 
 class FakeCursor:
     def __init__(self, rows):
@@ -170,6 +173,41 @@ class ControlPlaneWorkerTests(unittest.TestCase):
             self.worker.handle_delivery('{"task_id":"00000000-0000-0000-0000-000000000001","provider":"gigachat"}')
         )
         self.worker.gigachat.complete.assert_not_called()
+
+    def test_provider_cost_is_recorded_even_when_completion_loses_lease(self):
+        task_id = "00000000-0000-0000-0000-000000000001"
+        execution_id = "00000000-0000-0000-0000-000000000002"
+        self.worker.heartbeat = Mock()
+        self.worker.claim_task = Mock(return_value=execution_id)
+        self.worker.gigachat.complete = Mock(return_value={
+            "model": "GigaChat-test",
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+            "credential_lane": "primary",
+        })
+        self.worker.record_cost = Mock()
+        self.worker.record_succeeded = Mock(return_value=False)
+
+        self.assertTrue(self.worker.handle_delivery(
+            '{"task_id":"%s","provider":"gigachat"}' % task_id
+        ))
+
+        self.worker.record_cost.assert_called_once_with(
+            task_id, execution_id, "gigachat", "GigaChat-test",
+            {"prompt_tokens": 3, "completion_tokens": 2}, "primary",
+        )
+        self.worker.record_succeeded.assert_called_once()
+
+    def test_delivery_task_ids_reads_both_durable_queues_and_ignores_bad_payloads(self):
+        queued_id = "00000000-0000-0000-0000-000000000007"
+        processing_id = "00000000-0000-0000-0000-000000000008"
+        fake_queue = FakeQueue()
+        fake_queue.lrange = Mock(side_effect=[
+            ['{"task_id":"%s","provider":"local-smoke-test"}' % queued_id, "not json"],
+            ['{"task_id":"%s","provider":"local-smoke-test"}' % processing_id],
+        ])
+        self.worker.queue = fake_queue
+
+        self.assertEqual(self.worker.delivery_task_ids(), {queued_id, processing_id})
 
     def test_recovery_moves_exact_processing_payload_atomically(self):
         fake_queue = FakeQueue()
