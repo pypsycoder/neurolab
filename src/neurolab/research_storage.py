@@ -13,6 +13,7 @@ from neurolab.claim_review import ReviewedClaim
 from neurolab.fulltext_verification import FullTextReceipt
 from neurolab.it_research import ItResearchRun, ResearchItem
 from neurolab.license_verification import LicenseReceipt
+from neurolab.publisher_evidence import PublisherHtmlReceipt
 from neurolab.research_corpus import CoverageAssessment, SourceAssessment, classify_item
 
 
@@ -287,6 +288,41 @@ def persist_license_receipt(database_url: str, receipt: LicenseReceipt) -> str:
                 row = cursor.fetchone()
     except Exception as error:
         raise ItResearchStorageError("licence receipt persistence failed") from error
+    return str(row[0])
+
+
+def persist_publisher_html_receipt(database_url: str, receipt: PublisherHtmlReceipt) -> str:
+    """Persist a publisher evidence receipt, never its HTML or review excerpt."""
+    psycopg = _require_psycopg()
+    receipt_id = str(uuid4())
+    try:
+        with psycopg.connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO it_research.publisher_html_receipts
+                        (id, source_key, provider, document_url, license_id, html_sha256,
+                         visible_text_sha256, visible_character_count, checked_on, verification_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (source_key, html_sha256) DO UPDATE SET checked_on = EXCLUDED.checked_on
+                    RETURNING id
+                    """,
+                    (
+                        receipt_id,
+                        receipt.source_key,
+                        receipt.provider,
+                        receipt.document_url,
+                        receipt.license_id,
+                        receipt.html_sha256,
+                        receipt.visible_text_sha256,
+                        receipt.visible_character_count,
+                        receipt.checked_on,
+                        receipt.verification_status,
+                    ),
+                )
+                row = cursor.fetchone()
+    except Exception as error:
+        raise ItResearchStorageError("publisher HTML receipt persistence failed") from error
     return str(row[0])
 
 

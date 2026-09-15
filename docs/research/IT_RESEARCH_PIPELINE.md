@@ -61,3 +61,36 @@ merge, push, deploy, доступ к `.env` и любую clinical/patient ра�
 из `.env` в одноразовый container process; значения не попадают в URL,
 артефакты или Git. Миграция `postgres/migrations/20260915_01_it_research_corpus.sql`
 применяется явно к уже работающей БД: `init.sql` для этого не изменяется.
+
+## Второй контур: ограниченная publisher/code evidence
+
+Metadata discovery не должен становиться единственным источником истины, но
+переход от него к контенту идёт только через узкие provider-specific adapters.
+Первый такой маршрут для статей издателя — F1000Research:
+
+```bash
+PYTHONPATH=src runtime/langgraph-eval/bin/python scripts/run_f1000_html_evidence.py \
+  --source-key "<existing corpus source key>" --article-id 14-905 --version 1 --persist
+```
+
+Он формирует URL сам и не принимает URL, redirect, cookie, login или PDF. Он
+требует явный CC-BY 4.0, ограничивает ответ 2 MiB, отбрасывает script/style и
+передаёт не более 2 000 символов **только человеку на review**. PostgreSQL
+получает receipt: хеш HTML, хеш видимого текста, длину, лицензию и дату — без
+HTML, excerpt, prompt или автоматически созданного claim. Даже успешный
+receipt не делает источник `content_verified` и не открывает Code-agent ТЗ.
+
+Для публичной реализации существует отдельный GitHub metadata route:
+
+```bash
+PYTHONPATH=src runtime/langgraph-eval/bin/python scripts/verify_public_repository.py \
+  --source-key "<existing corpus source key>" --claim-id "<human-reviewed UUID>" \
+  --repository owner/repository --persist
+```
+
+Он получает только fixed `api.github.com` metadata/tree: SPDX-лицензию и
+сигналы README/tests/environment/data. Не загружает, не сохраняет и не
+исполняет код, README или данные. Запись в corpus возможна лишь после
+human-reviewed claim, связанного с тем же source. Это поднимает качество
+reproducibility evidence, но не заменяет pinned-snapshot, независимый sandbox
+reproduction и отдельное ручное решение.
