@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed')),
   provider TEXT,
   model TEXT,
+  credential_lane TEXT CHECK (credential_lane IN ('primary', 'freemium')),
   request_ref TEXT,
   result JSONB,
   execution_id UUID,
@@ -14,6 +15,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS result JSONB;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS execution_id UUID;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS credential_lane TEXT;
 
 CREATE TABLE IF NOT EXISTS cost_events (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

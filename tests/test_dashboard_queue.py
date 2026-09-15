@@ -35,6 +35,7 @@ class DashboardQueueTests(unittest.TestCase):
         self.dashboard = load_dashboard()
         self.dashboard.task_queue = Mock()
         self.dashboard.record_queued_task = Mock()
+        self.dashboard.daily_lane_task_count = Mock(return_value=0)
 
     def test_submission_persists_queued_state_then_enqueues(self):
         self.dashboard.task_queue.llen.return_value = 0
@@ -58,6 +59,18 @@ class DashboardQueueTests(unittest.TestCase):
             self.dashboard.create_task(request)
         self.assertEqual(raised.exception.status_code, 429)
         self.dashboard.record_queued_task.assert_not_called()
+
+    def test_submission_refuses_daily_credential_lane_budget(self):
+        self.dashboard.task_queue.llen.return_value = 0
+        self.dashboard.daily_lane_task_count.return_value = self.dashboard.MAX_TASKS_PER_LANE_PER_DAY
+        request = self.dashboard.TaskRequest(
+            prompt="synthetic check", model="GigaChat-2-Pro", credential_lane="freemium", max_tokens=32
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            self.dashboard.create_task(request)
+        self.assertEqual(raised.exception.status_code, 429)
+        self.dashboard.task_queue.rpush.assert_not_called()
 
 
 if __name__ == "__main__":

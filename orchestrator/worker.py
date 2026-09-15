@@ -257,10 +257,16 @@ def claim_task(task_id, payload):
     with psycopg.connect(db_url) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO tasks (id, status, provider, model, request_ref)
-                   VALUES (%s, 'queued', %s, %s, %s)
+                """INSERT INTO tasks (id, status, provider, model, credential_lane, request_ref)
+                   VALUES (%s, 'queued', %s, %s, %s, %s)
                    ON CONFLICT (id) DO NOTHING""",
-                (task_id, payload.get("provider"), payload.get("model"), payload.get("request_ref")),
+                (
+                    task_id,
+                    payload.get("provider"),
+                    payload.get("model"),
+                    payload.get("credential_lane"),
+                    payload.get("request_ref"),
+                ),
             )
             cur.execute(
                 """UPDATE tasks
@@ -317,6 +323,7 @@ def ensure_schema():
     with psycopg.connect(db_url) as conn:
         conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS result JSONB")
         conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS execution_id UUID")
+        conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS credential_lane TEXT")
         conn.execute(
             """CREATE TABLE IF NOT EXISTS worker_heartbeats (
                    worker_name TEXT PRIMARY KEY,

@@ -21,6 +21,9 @@ REDIS_URL = os.environ["REDIS_URL"]
 REFRESH_SECONDS = int(os.getenv("PANEL_REFRESH_SECONDS", "10"))
 TASK_QUEUE = "neuro-lab:tasks"
 MAX_QUEUE_DEPTH = max(1, int(os.getenv("DASHBOARD_MAX_QUEUE_DEPTH", "100")))
+MAX_TASKS_PER_LANE_PER_DAY = max(
+    1, int(os.getenv("DASHBOARD_MAX_TASKS_PER_LANE_PER_DAY", "50"))
+)
 CHAT_MODELS = (
     "GigaChat-2",
     "GigaChat-2-Max",
@@ -71,14 +74,32 @@ def host_metrics():
     }
 
 
+def daily_lane_task_count(credential_lane):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT count(*) FROM tasks
+                   WHERE credential_lane=%s
+                     AND created_at > now() - interval '24 hours'""",
+                (credential_lane,),
+            )
+            return cur.fetchone()[0]
+
+
 def record_queued_task(task_id, payload):
     """Persist the dashboard-visible queued state before delivery to Redis."""
     with psycopg.connect(DATABASE_URL) as conn:
         conn.execute(
-            """INSERT INTO tasks (id, status, provider, model, request_ref)
-               VALUES (%s, 'queued', %s, %s, %s)
+            """INSERT INTO tasks (id, status, provider, model, credential_lane, request_ref)
+               VALUES (%s, 'queued', %s, %s, %s, %s)
                ON CONFLICT (id) DO NOTHING""",
-            (task_id, payload["provider"], payload["model"], payload["request_ref"]),
+            (
+                task_id,
+                payload["provider"],
+                payload["model"],
+                payload["credential_lane"],
+                payload["request_ref"],
+            ),
         )
         conn.commit()
 
@@ -214,6 +235,8 @@ def create_task(request: TaskRequest):
     try:
         if task_queue.llen(TASK_QUEUE) >= MAX_QUEUE_DEPTH:
             raise HTTPException(status_code=429, detail="Task queue is at its safe capacity")
+        if daily_lane_task_count(request.credential_lane) >= MAX_TASKS_PER_LANE_PER_DAY:
+            raise HTTPException(status_code=429, detail="Credential lane reached its daily task budget")
         record_queued_task(task_id, payload)
         task_queue.rpush(TASK_QUEUE, json.dumps(payload, ensure_ascii=False))
     except redis.RedisError as exc:
