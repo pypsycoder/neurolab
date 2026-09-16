@@ -23,6 +23,7 @@ class GigaChatClientFactory:
         return constructor(
             credentials=settings.credentials,
             scope=settings.scope,
+            model=settings.model,
             base_url=settings.base_url,
             timeout=settings.timeout,
             verify_ssl_certs=settings.verify_ssl_certs,
