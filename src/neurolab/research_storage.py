@@ -14,6 +14,7 @@ from neurolab.fulltext_verification import FullTextReceipt
 from neurolab.it_research import ItResearchRun, ResearchItem
 from neurolab.license_verification import LicenseReceipt
 from neurolab.publisher_evidence import PublisherHtmlReceipt
+from neurolab.publisher_fulltext_verification import PublisherFullTextReceipt
 from neurolab.research_corpus import CoverageAssessment, SourceAssessment, classify_item
 
 
@@ -222,7 +223,9 @@ def record_synthesis_status(database_url: str, coverage: CoverageAssessment, *, 
     return synthesis_id
 
 
-def persist_fulltext_receipt(database_url: str, receipt: FullTextReceipt) -> str:
+def persist_fulltext_receipt(
+    database_url: str, receipt: FullTextReceipt | PublisherFullTextReceipt
+) -> str:
     """Persist only a legal open-access document receipt, never its PDF/text bytes."""
     psycopg = _require_psycopg()
     document_id = str(uuid4())

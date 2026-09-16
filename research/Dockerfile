@@ -14,6 +14,7 @@ COPY --chown=researcher:researcher scripts/run_arxiv_fulltext_cycle.py /app/scri
 COPY --chown=researcher:researcher scripts/record_reviewed_claim.py /app/scripts/record_reviewed_claim.py
 COPY --chown=researcher:researcher scripts/import_openalex_doi_record.py /app/scripts/import_openalex_doi_record.py
 COPY --chown=researcher:researcher scripts/run_f1000_html_evidence.py /app/scripts/run_f1000_html_evidence.py
+COPY --chown=researcher:researcher scripts/run_f1000_fulltext_cycle.py /app/scripts/run_f1000_fulltext_cycle.py
 COPY --chown=researcher:researcher scripts/verify_public_repository.py /app/scripts/verify_public_repository.py
 COPY --chown=researcher:researcher research/test_pdf_contract.py /app/tests/test_pdf_contract.py
 
