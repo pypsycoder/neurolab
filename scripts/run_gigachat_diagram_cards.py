@@ -75,13 +75,21 @@ def main() -> None:
     if len(texts) != identity.page_count: raise RuntimeError("PDF page count does not match document receipt")
     pages = tuple(args.pages) if args.pages else candidate_diagram_pages(texts, maximum_pages=args.maximum_pages)
     if not pages or len(pages) > 12 or any(not 1 <= page <= len(texts) for page in pages): raise RuntimeError("diagram page selection is outside the limit")
-    results = []
+    results: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
     with GigaChatClientFactory().create(GigaChatSettings.from_environment()) as client:
         for page in dict.fromkeys(pages):
-            image = render_page_png(response.payload, page_number=page)
-            card = parse_diagram_card(_vision(client, build_diagram_prompt(title=identity.title, page_number=page), image, page), source_key=identity.source_key, document_id=identity.document_id, document_sha256=identity.document_sha256, page_number=page, image_bytes=image)
-            results.append({"card_id": persist_diagram_card(database_url, card), "card": asdict(card), "card_sha256": card.card_sha256})
+            try:
+                image = render_page_png(response.payload, page_number=page)
+                card = parse_diagram_card(_vision(client, build_diagram_prompt(title=identity.title, page_number=page), image, page), source_key=identity.source_key, document_id=identity.document_id, document_sha256=identity.document_sha256, page_number=page, image_bytes=image)
+                results.append({"card_id": persist_diagram_card(database_url, card), "card": asdict(card), "card_sha256": card.card_sha256})
+            except Exception:
+                # A malformed page/model response must not expose raw content
+                # or stop the remaining independently bounded candidates.
+                failures.append({"page_number": page, "status": "analysis_failed"})
+    if not results:
+        raise RuntimeError("no diagram cards could be created")
     OUT.parent.mkdir(parents=True, exist_ok=True); OUT.write_text(json.dumps({"cards": results}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"diagram_cards: needs_review; pages={len(results)}")
+    print(f"diagram_cards: needs_review; pages={len(results)}; failures={len(failures)}")
 
 if __name__ == "__main__": main()
