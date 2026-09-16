@@ -11,7 +11,7 @@ from neurolab.research_storage import render_reviewed_card_packet
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT = PROJECT_ROOT / "runtime" / "it-research" / "reviewed-document-cards.json"
+DEFAULT_OUTPUT = PROJECT_ROOT / "runtime" / "it-research" / "reviewed-research-cards.json"
 
 
 def main() -> None:
@@ -28,7 +28,7 @@ def main() -> None:
         raise RuntimeError("card packet output must stay under the ignored runtime directory")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(packet, encoding="utf-8")
-    print("reviewed_document_cards: packet_written")
+    print("reviewed_research_cards: packet_written")
 
 
 if __name__ == "__main__":

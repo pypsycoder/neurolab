@@ -1,2 +1,5 @@
 psycopg[binary]==3.2.6
 pypdf==6.18.1
+gigachat==0.2.3
+pypdfium2==5.12.1
+Pillow==12.3.0
