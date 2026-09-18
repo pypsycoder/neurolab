@@ -7,9 +7,15 @@ import argparse
 import json
 import os
 
-from neurolab.evaluator_storage import persist_evaluation_run, persist_evaluator_version
+from neurolab.evaluator_storage import (
+    persist_evaluation_run,
+    persist_evaluator_version,
+    persist_solution_asset,
+    persist_solution_outcomes,
+)
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.gigachat_response_replay import request_synthetic_replay
+from neurolab.response_replay_memory import response_replay_outcome, response_replay_prompt_asset
 from neurolab.response_quality_evaluator import evaluate_response_quality, response_quality_shadow_evaluator
 
 
@@ -26,7 +32,12 @@ def main() -> None:
     if arguments.persist:
         database_url = os.environ.get("DATABASE_URL", "")
         persist_evaluator_version(database_url, evaluator)
-        persist_evaluation_run(database_url, run)
+        evaluator_run_id = persist_evaluation_run(database_url, run)
+        if evaluator_run_id != run.run_id:
+            raise RuntimeError("evaluator run receipt identity changed")
+        asset = response_replay_prompt_asset()
+        persist_solution_asset(database_url, asset)
+        persist_solution_outcomes(database_url, asset, (response_replay_outcome(run),))
     receipt = {
         "mode": "shadow",
         "evaluator_kind": evaluator.kind,
@@ -36,6 +47,7 @@ def main() -> None:
         "metrics": json.loads(run.metrics.as_json()),
         "model_calls": len(responses),
         "persisted": arguments.persist,
+        "solution_memory_outcome": response_replay_outcome(run).outcome,
         "scope": "live_model_over_synthetic_prompts_only",
     }
     print(json.dumps(receipt, sort_keys=True))

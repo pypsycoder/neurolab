@@ -214,6 +214,7 @@ def persist_evaluator_decision(database_url: str, decision: EvaluatorDecision) -
 
 
 def persist_solution_asset(database_url: str, asset: SolutionAsset) -> str:
+    """Idempotently register an immutable asset receipt without resetting state."""
     _url(database_url); psycopg = _psycopg()
     try:
         with psycopg.connect(database_url) as connection:
@@ -221,22 +222,31 @@ def persist_solution_asset(database_url: str, asset: SolutionAsset) -> str:
                 cursor.execute(
                     """
                     INSERT INTO it_research.solution_assets (id, asset_kind, label, content_sha256, state)
-                    VALUES (%s,%s,%s,%s,%s) RETURNING id
+                    VALUES (%s,%s,%s,%s,%s)
+                    ON CONFLICT (asset_kind, content_sha256) DO NOTHING
+                    RETURNING id, label
                     """,
                     (asset.asset_id, asset.kind, asset.label, asset.content_sha256, asset.state),
                 )
                 row = cursor.fetchone()
+                if row is None:
+                    cursor.execute(
+                        """
+                        SELECT id, label FROM it_research.solution_assets
+                        WHERE asset_kind = %s AND content_sha256 = %s
+                        """,
+                        (asset.kind, asset.content_sha256),
+                    )
+                    row = cursor.fetchone()
     except Exception as error:
         raise EvaluatorStorageError("solution asset persistence failed") from error
+    if row is None or str(row[1]) != asset.label:
+        raise EvaluatorStorageError("solution asset conflicts with an immutable receipt")
     return str(row[0])
 
 
 def persist_solution_outcomes(database_url: str, asset: SolutionAsset, outcomes: tuple[SolutionOutcome, ...]) -> str:
-    """Store independently evaluated outcomes and derive the next reusable state."""
-    try:
-        next_state = next_asset_state(asset, outcomes)
-    except SolutionMemoryError as error:
-        raise EvaluatorStorageError("solution outcome transition is malformed") from error
+    """Store outcomes and derive state from the complete persisted history."""
     _url(database_url); psycopg = _psycopg()
     try:
         with psycopg.connect(database_url) as connection:
@@ -252,6 +262,19 @@ def persist_solution_outcomes(database_url: str, asset: SolutionAsset, outcomes:
                         (str(uuid4()), outcome.asset_id, outcome.synthetic_run_sha256, outcome.evaluator_run_id,
                          outcome.outcome, outcome.primary_quality, outcome.safety_quality),
                     )
+                cursor.execute(
+                    """
+                    SELECT synthetic_run_sha256, evaluator_run_id, outcome, primary_quality, safety_quality
+                    FROM it_research.solution_outcomes WHERE asset_id = %s
+                    ORDER BY recorded_at, id
+                    """,
+                    (asset.asset_id,),
+                )
+                history = tuple(
+                    SolutionOutcome(asset.asset_id, str(row[0]), str(row[1]), str(row[2]), float(row[3]), float(row[4]))
+                    for row in cursor.fetchall()
+                )
+                next_state = next_asset_state(asset, history)
                 cursor.execute(
                     "UPDATE it_research.solution_assets SET state = %s WHERE id = %s RETURNING id",
                     (next_state, asset.asset_id),
