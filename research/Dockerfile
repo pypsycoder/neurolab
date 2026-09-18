@@ -21,6 +21,7 @@ COPY --chown=researcher:researcher scripts/review_document_card.py /app/scripts/
 COPY --chown=researcher:researcher scripts/review_diagram_card.py /app/scripts/review_diagram_card.py
 COPY --chown=researcher:researcher scripts/render_reviewed_card_packet.py /app/scripts/render_reviewed_card_packet.py
 COPY --chown=researcher:researcher scripts/verify_public_repository.py /app/scripts/verify_public_repository.py
+COPY --chown=researcher:researcher scripts/verify_evaluator_evolution_smoke.py /app/scripts/verify_evaluator_evolution_smoke.py
 COPY --chown=researcher:researcher research/test_pdf_contract.py /app/tests/test_pdf_contract.py
 
 USER researcher
