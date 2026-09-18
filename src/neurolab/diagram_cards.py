@@ -56,11 +56,29 @@ class DiagramCard:
 
 
 def candidate_diagram_pages(page_texts: tuple[str, ...], *, maximum_pages: int = 8) -> tuple[int, ...]:
-    """Conservative text-cue shortlist; it does not claim that every page is a diagram."""
+    """Return a bounded shortlist from captions plus a sparse-layout signal.
+
+    Sparse pages in an otherwise text-dense paper often contain a figure with no
+    extractable caption.  This remains a recall heuristic only: Vision and a
+    human reviewer decide whether the page actually contains a useful diagram.
+    """
     if not 1 <= len(page_texts) <= 100 or not 1 <= maximum_pages <= 12:
         raise DiagramCardError("diagram candidate boundary is malformed")
-    candidates = [index + 1 for index, text in enumerate(page_texts) if _FIGURE.search(text)]
-    return tuple(candidates[:maximum_pages])
+    lengths = sorted(len(text.strip()) for text in page_texts)
+    median_length = lengths[len(lengths) // 2]
+    ranked: list[tuple[int, int]] = []
+    for index, text in enumerate(page_texts):
+        length = len(text.strip())
+        caption_score = 2 if _FIGURE.search(text) else 0
+        # Do not promote a title/blank page from a short fixture or a sparse
+        # slide deck. The signal applies only within a sufficiently text-dense
+        # paper and only to a page that still contains meaningful extracted text.
+        sparse_layout_score = int(
+            median_length >= 1200 and 160 <= length <= median_length * 0.60
+        )
+        if caption_score or sparse_layout_score:
+            ranked.append((caption_score + sparse_layout_score, index + 1))
+    return tuple(sorted(page for _, page in sorted(ranked, key=lambda item: (-item[0], item[1]))[:maximum_pages]))
 
 
 def render_page_png(pdf_bytes: bytes, *, page_number: int) -> bytes:
