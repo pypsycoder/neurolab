@@ -45,6 +45,6 @@ GitHub сообщил, что для аккаунта недоступны priva
 ## Связанные артефакты
 
 - `.gitignore`
-- `ENVIRONMENT_AND_SECRETS_POLICY.md`
+- [`ENVIRONMENT_AND_SECRETS_POLICY.md`](../governance/ENVIRONMENT_AND_SECRETS_POLICY.md)
 - `ROADMAP.md`
 - `docs/adr/0001-research-mode-russia-synthetic-data.md`

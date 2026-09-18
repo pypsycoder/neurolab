@@ -46,8 +46,8 @@ synthetic-only тестовыми наборами, проверкой журн�
 
 ## Связанные артефакты
 
-- `PROJECT_GOVERNANCE.md`
-- `ARCHITECTURE_BOUNDARIES.md`
-- `ENVIRONMENT_AND_SECRETS_POLICY.md`
-- `RISK_REGISTER.md`
+- [`PROJECT_GOVERNANCE.md`](../governance/PROJECT_GOVERNANCE.md)
+- [`BOUNDARIES.md`](../architecture/BOUNDARIES.md)
+- [`ENVIRONMENT_AND_SECRETS_POLICY.md`](../governance/ENVIRONMENT_AND_SECRETS_POLICY.md)
+- [`RISK_REGISTER.md`](../governance/RISK_REGISTER.md)
 - `ROADMAP.md`
