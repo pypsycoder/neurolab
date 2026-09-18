@@ -28,7 +28,12 @@ def _url(database_url: str) -> None:
 
 
 def persist_evaluator_version(database_url: str, evaluator: EvaluatorVersion) -> str:
-    """Write definition hashes and case-set hashes, never test content or prompts."""
+    """Idempotently write one definition, never test content or prompts.
+
+    A repeated shadow run may reuse an immutable version only when every
+    identity-bearing field is identical.  A label collision cannot silently
+    overwrite a previously registered evaluator.
+    """
     _url(database_url); psycopg = _psycopg()
     try:
         with psycopg.connect(database_url) as connection:
@@ -40,17 +45,41 @@ def persist_evaluator_version(database_url: str, evaluator: EvaluatorVersion) ->
                      frozen_case_set_sha256, active_case_set_sha256, state, proposed_by)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (evaluator_kind, version_label) DO NOTHING
-                    RETURNING id
+                    RETURNING id, parent_id, definition_sha256,
+                              frozen_case_set_sha256, active_case_set_sha256,
+                              state, proposed_by
                     """,
                     (evaluator.evaluator_id, evaluator.kind, evaluator.version, evaluator.parent_evaluator_id,
                      evaluator.definition_sha256, evaluator.frozen_case_set_sha256,
                      evaluator.active_case_set_sha256, evaluator.state, evaluator.proposed_by),
                 )
                 row = cursor.fetchone()
+                if row is None:
+                    cursor.execute(
+                        """
+                        SELECT id, parent_id, definition_sha256,
+                               frozen_case_set_sha256, active_case_set_sha256,
+                               state, proposed_by
+                        FROM it_research.evaluator_versions
+                        WHERE evaluator_kind = %s AND version_label = %s
+                        """,
+                        (evaluator.kind, evaluator.version),
+                    )
+                    row = cursor.fetchone()
     except Exception as error:
         raise EvaluatorStorageError("evaluator version persistence failed") from error
+    expected = (
+        evaluator.parent_evaluator_id,
+        evaluator.definition_sha256,
+        evaluator.frozen_case_set_sha256,
+        evaluator.active_case_set_sha256,
+        evaluator.state,
+        evaluator.proposed_by,
+    )
     if row is None:
         raise EvaluatorStorageError("evaluator version label already exists")
+    if tuple(str(value) if value is not None else None for value in row[1:]) != expected:
+        raise EvaluatorStorageError("evaluator version label conflicts with an immutable definition")
     return str(row[0])
 
 
