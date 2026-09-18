@@ -25,6 +25,7 @@ COPY --chown=researcher:researcher scripts/verify_evaluator_evolution_smoke.py /
 COPY --chown=researcher:researcher scripts/run_article_scoring_shadow.py /app/scripts/run_article_scoring_shadow.py
 COPY --chown=researcher:researcher scripts/run_response_quality_shadow.py /app/scripts/run_response_quality_shadow.py
 COPY --chown=researcher:researcher scripts/run_gigachat_response_quality_replay.py /app/scripts/run_gigachat_response_quality_replay.py
+COPY --chown=researcher:researcher scripts/run_semantic_response_holdout.py /app/scripts/run_semantic_response_holdout.py
 COPY --chown=researcher:researcher scripts/queue_arxiv_fulltext_preflight.py /app/scripts/queue_arxiv_fulltext_preflight.py
 COPY --chown=researcher:researcher research/test_pdf_contract.py /app/tests/test_pdf_contract.py
 

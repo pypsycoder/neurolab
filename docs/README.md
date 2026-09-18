@@ -1,7 +1,7 @@
 # Документация НейроЛаба
 
 - [`architecture/`](architecture/) — границы контуров, роли агентов и traces.
-- [`governance/`](governance/) — управление, риски и политика секретов.
+- [`governance/`](governance/) — управление, риски, политика секретов и [sealed semantic holdout](governance/SEALED_HOLDOUT_PROTOCOL.md).
 - [`deployment/`](deployment/) — Raspberry Pi 5 и план control plane.
 - [`integrations/`](integrations/) — контракты внешних интеграций.
 - [`research/`](research/) — evidence pipeline и policy публичных источников.
