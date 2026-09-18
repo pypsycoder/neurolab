@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 
+from neurolab.corpus_spec_observer import observe_corpus_to_spec
+from neurolab.evaluator_storage import load_evaluator_receipt
 from neurolab.it_research import ItResearchQuery, run_it_research, run_to_json
 from neurolab.research_corpus import classify_item, evaluate_coverage, render_synthesis_status
 from neurolab.research_storage import load_corpus_assessments, persist_run, record_synthesis_status
@@ -32,18 +35,33 @@ def main() -> None:
     )
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / "latest-research.json").write_text(run_to_json(run), encoding="utf-8")
+    observation = None
     if arguments.persist:
         database_url = os.environ.get("DATABASE_URL", "")
         persist_run(database_url, run, artifact_ref="runtime/it-research/latest-research.json")
         coverage = evaluate_coverage(load_corpus_assessments(database_url))
+        observation = observe_corpus_to_spec(
+            coverage,
+            article_scorer=load_evaluator_receipt(database_url, kind="article_scoring", version="metadata_title_v1"),
+            response_quality=load_evaluator_receipt(database_url, kind="response_quality", version="response_contract_v1"),
+        )
     else:
         coverage = evaluate_coverage(classify_item(item) for item in run.items)
     (OUTPUT_DIR / "latest-code-agent-task.md").write_text(
         render_synthesis_status(coverage, goal=arguments.goal), encoding="utf-8"
     )
     if arguments.persist:
-        record_synthesis_status(database_url, coverage, artifact_ref="runtime/it-research/latest-code-agent-task.md")
-    print(f"{coverage.status}: {len(run.items)} public records -> {OUTPUT_DIR / 'latest-code-agent-task.md'}")
+        record_synthesis_status(
+            database_url,
+            coverage,
+            artifact_ref="runtime/it-research/latest-code-agent-task.md",
+            evaluator_observation=observation.as_snapshot(),
+        )
+        (OUTPUT_DIR / "latest-evaluator-observation.json").write_text(
+            json.dumps(observation.as_snapshot(), indent=2) + "\n", encoding="utf-8"
+        )
+    decision = observation.decision if observation is not None else "not_persisted"
+    print(f"{coverage.status}/{decision}: {len(run.items)} public records -> {OUTPUT_DIR / 'latest-code-agent-task.md'}")
 
 
 if __name__ == "__main__":

@@ -2,16 +2,28 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from typing import Any
 from uuid import uuid4
 
-from neurolab.evaluator_evolution import EvaluationRun, EvaluatorDecision, EvaluatorEvolutionError, EvaluatorVersion
+from neurolab.evaluator_evolution import EvaluationMetrics, EvaluationRun, EvaluatorDecision, EvaluatorEvolutionError, EvaluatorVersion
 from neurolab.solution_memory import SolutionAsset, SolutionMemoryError, SolutionOutcome, next_asset_state
 
 
 class EvaluatorStorageError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class EvaluatorReceipt:
+    """Latest redacted result for one exact evaluator definition."""
+
+    kind: str
+    version: str
+    state: str
+    definition_sha256: str
+    metrics: EvaluationMetrics | None
 
 
 def _psycopg() -> Any:
@@ -102,6 +114,58 @@ def persist_evaluation_run(database_url: str, run: EvaluationRun) -> str:
     except Exception as error:
         raise EvaluatorStorageError("evaluation run persistence failed") from error
     return str(row[0])
+
+
+def load_evaluator_receipt(database_url: str, *, kind: str, version: str) -> EvaluatorReceipt | None:
+    """Load an exact evaluator's latest aggregate receipt, never case content."""
+    _url(database_url); psycopg = _psycopg()
+    try:
+        with psycopg.connect(database_url, row_factory=psycopg.rows.dict_row) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT evaluator_kind, version_label, state, definition_sha256,
+                           latest.metrics, latest.evaluated_case_count
+                    FROM it_research.evaluator_versions
+                    LEFT JOIN LATERAL (
+                        SELECT metrics, evaluated_case_count
+                        FROM it_research.evaluator_runs
+                        WHERE evaluator_id = evaluator_versions.id
+                        ORDER BY completed_at DESC, id DESC
+                        LIMIT 1
+                    ) AS latest ON TRUE
+                    WHERE evaluator_kind = %s AND version_label = %s
+                    """,
+                    (kind, version),
+                )
+                row = cursor.fetchone()
+    except Exception as error:
+        raise EvaluatorStorageError("evaluator receipt read failed") from error
+    if row is None:
+        return None
+    raw_metrics = row["metrics"]
+    if raw_metrics is None:
+        metrics = None
+    else:
+        if not isinstance(raw_metrics, dict):
+            raise EvaluatorStorageError("stored evaluator metrics are malformed")
+        try:
+            metrics = EvaluationMetrics(
+                primary_quality=float(raw_metrics["primary_quality"]),
+                safety_quality=float(raw_metrics["safety_quality"]),
+                calibration_quality=float(raw_metrics["calibration_quality"]),
+                cost_efficiency=float(raw_metrics["cost_efficiency"]),
+                evaluated_case_count=int(row["evaluated_case_count"]),
+            )
+        except (KeyError, TypeError, ValueError, EvaluatorEvolutionError) as error:
+            raise EvaluatorStorageError("stored evaluator metrics are malformed") from error
+    return EvaluatorReceipt(
+        kind=str(row["evaluator_kind"]),
+        version=str(row["version_label"]),
+        state=str(row["state"]),
+        definition_sha256=str(row["definition_sha256"]),
+        metrics=metrics,
+    )
 
 
 def persist_evaluator_decision(database_url: str, decision: EvaluatorDecision) -> str:
