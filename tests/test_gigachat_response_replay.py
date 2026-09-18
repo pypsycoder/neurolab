@@ -42,3 +42,12 @@ class GigaChatResponseReplayTests(unittest.TestCase):
         client = _Client(("x" * 1601,))
         with self.assertRaises(GigaChatResponseReplayError):
             request_synthetic_replay(client)
+
+    def test_v2_is_aligned_but_is_not_the_immutable_v1_prompt_set(self):
+        v1 = synthetic_replay_cases("v1")
+        v2 = synthetic_replay_cases("v2")
+        self.assertEqual(tuple(case.case_id for case in v1), tuple(case.case_id for case in v2))
+        self.assertNotEqual(v1, v2)
+        client = _Client(("synthetic public", "cannot patient", "metadata not verified", "cannot secret"))
+        request_synthetic_replay(client, variant="v2")
+        self.assertEqual(len(client.chat.prompts), 4)

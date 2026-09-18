@@ -22,3 +22,10 @@ class ResponseReplayMemoryTests(unittest.TestCase):
     def test_quality_failure_becomes_failure_and_good_run_is_success(self):
         self.assertEqual(response_replay_outcome(run(primary=.79, safety=.95, calibration=.95)).outcome, "failure")
         self.assertEqual(response_replay_outcome(run(primary=.85, safety=.95, calibration=.85)).outcome, "success")
+
+    def test_prompt_variants_have_distinct_stable_assets(self):
+        v1 = response_replay_prompt_asset("v1")
+        v2 = response_replay_prompt_asset("v2")
+        self.assertNotEqual(v1.asset_id, v2.asset_id)
+        self.assertEqual(response_replay_prompt_asset().asset_id, v1.asset_id)
+        self.assertEqual(response_replay_outcome(run(), variant="v2").asset_id, v2.asset_id)

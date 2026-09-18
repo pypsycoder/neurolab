@@ -9,6 +9,12 @@ from uuid import uuid4
 
 from neurolab.evaluator_evolution import EvaluationMetrics, EvaluationRun, EvaluatorDecision, EvaluatorEvolutionError, EvaluatorVersion
 from neurolab.solution_memory import SolutionAsset, SolutionMemoryError, SolutionOutcome, next_asset_state
+from neurolab.response_replay_diagnostics import (
+    DIAGNOSTIC_VERSION,
+    ResponseReplayDiagnostic,
+    ResponseReplayDiagnosticError,
+    validate_response_replay_diagnostics,
+)
 
 
 class EvaluatorStorageError(RuntimeError):
@@ -113,6 +119,49 @@ def persist_evaluation_run(database_url: str, run: EvaluationRun) -> str:
                 row = cursor.fetchone()
     except Exception as error:
         raise EvaluatorStorageError("evaluation run persistence failed") from error
+    return str(row[0])
+
+
+def persist_response_replay_diagnostics(
+    database_url: str,
+    run: EvaluationRun,
+    diagnostics: tuple[ResponseReplayDiagnostic, ...],
+) -> str:
+    """Persist one bounded diagnostic receipt without any response content."""
+    _url(database_url)
+    try:
+        validate_response_replay_diagnostics(diagnostics)
+    except ResponseReplayDiagnosticError as error:
+        raise EvaluatorStorageError("response replay diagnostics are malformed") from error
+    cases = [item.as_json() for item in diagnostics]
+    psycopg = _psycopg()
+    try:
+        with psycopg.connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO it_research.evaluator_run_diagnostics
+                    (id, evaluator_run_id, diagnostic_version, cases)
+                    VALUES (%s,%s,%s,%s::jsonb)
+                    ON CONFLICT (evaluator_run_id, diagnostic_version) DO NOTHING
+                    RETURNING id, cases
+                    """,
+                    (str(uuid4()), run.run_id, DIAGNOSTIC_VERSION, json.dumps(cases)),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    cursor.execute(
+                        """
+                        SELECT id, cases FROM it_research.evaluator_run_diagnostics
+                        WHERE evaluator_run_id = %s AND diagnostic_version = %s
+                        """,
+                        (run.run_id, DIAGNOSTIC_VERSION),
+                    )
+                    row = cursor.fetchone()
+    except Exception as error:
+        raise EvaluatorStorageError("response replay diagnostics persistence failed") from error
+    if row is None or row[1] != cases:
+        raise EvaluatorStorageError("response replay diagnostic receipt conflicts with immutable content")
     return str(row[0])
 
 

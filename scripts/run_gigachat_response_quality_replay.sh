@@ -45,4 +45,4 @@ docker compose --profile claim-proposal run --rm \
   -e "GIGACHAT_MODEL=$MODEL" \
   -e "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" \
   -v "$SYSTEM_CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
-  --entrypoint python claim-proposal /app/scripts/run_gigachat_response_quality_replay.py --persist
+  --entrypoint python claim-proposal /app/scripts/run_gigachat_response_quality_replay.py --persist "$@"
