@@ -8,7 +8,7 @@ from dataclasses import asdict
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -19,6 +19,7 @@ from neurolab.document_cards import (
     parse_window_note,
     plan_page_windows,
 )
+from neurolab.gigachat_retry import GigaChatRetryError, bounded_gigachat_call
 from neurolab.fulltext_verification import OpenAccessPdfRequest, _extract_pdf, default_pdf_transport
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.research_storage import load_document_identity, persist_document_card
@@ -32,7 +33,7 @@ class _WindowResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str
-    architecture_layers: list[str]
+    architecture_layers: list[Literal["global_architecture", "subsystem", "component", "feature"]]
     implementation_signals: list[str]
     evaluation_signals: list[str]
     limitations: list[str]
@@ -43,7 +44,7 @@ class _FindingResponse(BaseModel):
 
     page_start: int
     page_end: int
-    kind: str
+    kind: Literal["architecture", "method", "implementation", "evaluation", "limitation"]
     summary: str
 
 
@@ -53,7 +54,7 @@ class _CardResponse(BaseModel):
     document_summary: str
     research_problem: str
     method: str
-    architecture_layers: list[str]
+    architecture_layers: list[Literal["global_architecture", "subsystem", "component", "feature"]]
     implementation_signals: list[str]
     evaluation_signals: list[str]
     limitations: list[str]
@@ -63,16 +64,21 @@ class _CardResponse(BaseModel):
     reproducibility: float | None
     feasibility_now: float | None
     source_independence: float | None
-    uncertainty: str
+    uncertainty: Literal["low", "medium", "high", "unknown"]
 
 
-def _ask(client: Any, prompt: str, response_format: type[BaseModel]) -> str:
+def _ask(client: Any, prompt: str, response_format: type[BaseModel], *, max_retries: int) -> str:
     """Use the SDK JSON-schema mode, then revalidate with the local contract."""
     try:
-        _, response = client.chat_parse(prompt, response_format=response_format, strict=True)
+        _, response = bounded_gigachat_call(
+            lambda: client.chat_parse(prompt, response_format=response_format, strict=True),
+            max_retries=max_retries,
+        )
         return response.model_dump_json()
-    except Exception as error:
-        raise RuntimeError("GigaChat structured document-card request failed") from error
+    except GigaChatRetryError:
+        raise
+    except Exception:
+        raise RuntimeError("GigaChat structured document-card request failed") from None
 
 
 def main() -> None:
@@ -81,6 +87,7 @@ def main() -> None:
     parser.add_argument("--document-id", required=True)
     parser.add_argument("--arxiv-id", required=True)
     parser.add_argument("--pages-per-window", type=int, default=2)
+    parser.add_argument("--max-rate-limit-retries", type=int, default=2)
     parser.add_argument("--persist", action="store_true", help="Store only the bounded card using DATABASE_URL.")
     arguments = parser.parse_args()
 
@@ -102,17 +109,23 @@ def main() -> None:
     with GigaChatClientFactory().create(settings) as client:
         notes = tuple(
             parse_window_note(
-                _ask(client, build_window_prompt(title=identity.title, window=window), _WindowResponse),
+                _ask(
+                    client,
+                    build_window_prompt(title=identity.title, window=window),
+                    _WindowResponse,
+                    max_retries=arguments.max_rate_limit_retries,
+                ),
                 window=window,
             )
             for window in windows
         )
         card = parse_document_card(
-            _ask(
-                client,
-                build_card_prompt(title=identity.title, page_count=receipt.page_count, notes=notes),
-                _CardResponse,
-            ),
+                _ask(
+                    client,
+                    build_card_prompt(title=identity.title, page_count=receipt.page_count, notes=notes),
+                    _CardResponse,
+                    max_retries=arguments.max_rate_limit_retries,
+                ),
             source_key=identity.source_key,
             document_id=identity.document_id,
             document_sha256=receipt.sha256,
@@ -133,4 +146,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (GigaChatRetryError, RuntimeError, ValueError) as error:
+        raise SystemExit(f"document_card_failed: {error}")

@@ -17,33 +17,18 @@ if [[ ! -f "$ENV_FILE" || ! -x "$PYTHON_BIN" || ! -f "$SYSTEM_CA_BUNDLE" ]]; the
   exit 1
 fi
 
-CREDENTIAL="$(NEUROLAB_ENV_FILE="$ENV_FILE" $PYTHON_BIN -c '
-import os
-from dotenv import dotenv_values
-values = dotenv_values(os.environ["NEUROLAB_ENV_FILE"])
-name = os.environ.get("NEUROLAB_GIGACHAT_CREDENTIAL_ENV", values.get("GIGACHAT_PRIMARY_KEY_ENV", "GIGACHAT_CREDENTIALS"))
-if not isinstance(name, str) or not name.isidentifier(): raise SystemExit("Configured GigaChat credential name is invalid.")
-value = values.get(name)
-if not value: raise SystemExit("Configured GigaChat credential is absent or empty.")
-print(value)
-')"
+source "$PROJECT_ROOT/scripts/lib/gigachat_failover.sh"
 
-MODEL="$(NEUROLAB_ENV_FILE="$ENV_FILE" $PYTHON_BIN -c '
-import os, re
-from dotenv import dotenv_values
-value = dotenv_values(os.environ["NEUROLAB_ENV_FILE"]).get("GIGACHAT_MODEL", "GigaChat-2-Pro")
-if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{2,80}", value.strip()):
-    raise SystemExit("Configured GigaChat model is invalid.")
-print(value.strip())
-')"
+run_document_card_lane() {
+  local _lane="$1" credential="$2" model="$3"
+  shift 3
+  cd "$PROJECT_ROOT"
+  docker compose --profile claim-proposal run --rm \
+    -e "GIGACHAT_CREDENTIALS=$credential" \
+    -e "GIGACHAT_MODEL=$model" \
+    -e "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" \
+    -v "$SYSTEM_CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
+    --entrypoint python claim-proposal /app/scripts/run_gigachat_document_card.py --persist "$@"
+}
 
-cleanup() { unset CREDENTIAL MODEL; }
-trap cleanup EXIT
-
-cd "$PROJECT_ROOT"
-docker compose --profile claim-proposal run --rm \
-  -e "GIGACHAT_CREDENTIALS=$CREDENTIAL" \
-  -e "GIGACHAT_MODEL=$MODEL" \
-  -e "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" \
-  -v "$SYSTEM_CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
-  --entrypoint python claim-proposal /app/scripts/run_gigachat_document_card.py --persist "$@"
+gigachat_run_with_failover "$PROJECT_ROOT" "$ENV_FILE" "$PYTHON_BIN" run_document_card_lane "$@"
