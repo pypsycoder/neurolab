@@ -26,7 +26,7 @@ def is_transient_gigachat_error(error: Exception) -> bool:
 
 def run_redacted_cli(main: Callable[[], None], *, component: str) -> None:
     """A stable exit-code protocol for wrappers; do not print raw exceptions."""
-    if component not in {"document_card", "diagram_cards", "response_replay", "experimental_spec"}:
+    if component not in {"document_card", "diagram_cards", "response_replay", "experimental_spec", "code_candidate"}:
         raise ValueError("unknown CLI component")
     try:
         main()

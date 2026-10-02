@@ -30,3 +30,10 @@ Docker log driver `none`. Результат — `harvest_parts`, не auto-merg
 candidate mount. Обязателен реальный memory cgroup, а не только Docker flag.
 Первый runner ограничивает wall time, CPU/RAM/PIDs, но пока не обеспечивает
 per-call token accounting/central budget: это R7, continuous mode запрещён.
+
+Для этой же fixed pure-function family разрешён альтернативный CodeProposal
+через официальный GigaChat SDK без tools/agent shell. Это не подмена OpenHands
+для general repository coding: adapter сохраняет только AST-validated source
+(16kB, pending independent evaluation) и numeric self-score/usage; JSON/raw
+response не сохраняется. Тот же frozen evaluator определяет outcome, а при
+failure source удаляется, receipt остаётся. Ручного написания модели кода нет.
