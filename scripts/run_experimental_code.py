@@ -139,8 +139,12 @@ def main():
         proxy_env.write_text(''.join(f'{name}={value}\n' for name,value in pairs.items())); proxy_env.chmod(0o600)
         require(['docker','run','-d','--rm','--name',proxy,'--network',upstream_network,*security,
             '--memory','512m','--memory-swap','512m','--tmpfs','/tmp:rw,noexec,nosuid,size=32m',
-            '--env-file',str(proxy_env),'-e','MODE=PROD','-e','GPT2GIGA_HOST=0.0.0.0','-e','GPT2GIGA_PORT=8090',
+            '--env-file',str(proxy_env),'-e','GPT2GIGA_MODE=PROD','-e','GPT2GIGA_HOST=0.0.0.0','-e','GPT2GIGA_PORT=8090',
             '-e','GPT2GIGA_ENABLE_API_KEY_AUTH=true','-e','SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt',
+            '-e','GPT2GIGA_LOG_FILENAME=/tmp/gpt2giga.log','-e','GPT2GIGA_TRAFFIC_LOG_ENABLED=false',
+            '-e','GPT2GIGA_OBSERVABILITY_ENABLED=false','-e','GPT2GIGA_UI_ENABLED=false',
+            '-e','GPT2GIGA_ADMIN_API_ENABLED=false','-e','GPT2GIGA_DEFAULT_MAX_TOKENS=2048',
+            '-e','GIGACHAT_TIMEOUT=120',
             '-v',f'{ca}:/etc/ssl/certs/ca-certificates.crt:ro',IMAGE])
         require(['docker','network','connect','--alias','gpt2giga',agent_network,proxy])
         ready = False

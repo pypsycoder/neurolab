@@ -7,6 +7,13 @@ from test_experimental_spec import raw_draft
 
 
 class ExperimentalCodeTests(unittest.TestCase):
+    def test_gateway_uses_ephemeral_log_location_and_model_output_default(self):
+        runner = (Path(__file__).resolve().parents[1]/'scripts/run_experimental_code.py').read_text()
+        self.assertIn('GPT2GIGA_LOG_FILENAME=/tmp/gpt2giga.log',runner)
+        self.assertIn('GPT2GIGA_TRAFFIC_LOG_ENABLED=false',runner)
+        self.assertIn('GPT2GIGA_DEFAULT_MAX_TOKENS=2048',runner)
+        self.assertIn("'--network','none'",runner)
+
     def test_task_has_fixed_permissions_not_shell_from_spec(self):
         task = build_code_task(DraftSpec.model_validate(raw_draft()))
         self.assertIn('ONLY /workspace/experiment/provenance.py', task)
