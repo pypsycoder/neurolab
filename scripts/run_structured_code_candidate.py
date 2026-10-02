@@ -13,7 +13,7 @@ from gigachat.models import Chat, Messages
 from neurolab.experimental_spec import DraftSpec, canonical_json, content_hash
 from neurolab.experimental_code import build_code_task, validate_code_asset
 from neurolab.code_diagnostics import static_diagnostics
-from neurolab.code_repair import CodeRepair, apply_line_repair
+from neurolab.code_repair import CodeRepair, apply_line_repair, parse_repair_response
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.gigachat_retry import bounded_gigachat_call, run_redacted_cli
 
@@ -56,6 +56,8 @@ def main():
             feedback['static_diagnostics']=static_diagnostics(previous)
     response_schema = CodeRepair if previous_code else CodeProposal
     output_contract = '''Return a strict CodeRepair object with numeric self_score and line_edits.
+Return JSON only, no Markdown, explanation or tools. Example shape:
+{"self_score":0.5,"line_edits":[{"line":1,"replacement":"one complete Python line"}]}
 Each edit replaces one existing source line: line is its 1-based number, replacement is the complete single line preserving indentation.
 Return only necessary changes, at most 10 unique lines. No added/deleted lines or embedded newlines.
 ''' if previous_code else '''Return a strict CodeProposal object with numeric self_score and complete Python source_lines.
@@ -82,7 +84,11 @@ No clinical/production action, merge or evaluator changes. Generate a feasible p
     with GigaChatClientFactory().create(settings) as client:
         request = Chat(messages=[Messages(role='user',content=prompt)],temperature=0,max_tokens=1024 if previous_code else 4096)
         try:
-            response, proposal = bounded_gigachat_call(lambda:client.chat_parse(request,response_format=response_schema,strict=True),max_retries=0)
+            if previous_code:
+                response=bounded_gigachat_call(lambda:client.chat(request),max_retries=0)
+                proposal=parse_repair_response(response)
+            else:
+                response, proposal = bounded_gigachat_call(lambda:client.chat_parse(request,response_format=response_schema,strict=True),max_retries=0)
         except Exception as error:
             from gigachat.exceptions import LengthFinishReasonError
             if isinstance(error,LengthFinishReasonError):

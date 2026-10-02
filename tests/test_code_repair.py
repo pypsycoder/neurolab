@@ -1,5 +1,6 @@
 import unittest
-from neurolab.code_repair import CodeRepair, apply_line_repair
+from types import SimpleNamespace
+from neurolab.code_repair import CodeRepair, apply_line_repair, parse_repair_response
 
 
 class CodeRepairTests(unittest.TestCase):
@@ -12,3 +13,15 @@ class CodeRepairTests(unittest.TestCase):
             proposal=CodeRepair.model_validate({'self_score':.5,'line_edits':edits})
             with self.assertRaises(ValueError):
                 apply_line_repair('a\nb\n',proposal)
+
+    def test_complete_json_required_and_length_flag_never_ignored(self):
+        content='{"self_score":0.5,"line_edits":[{"line":2,"replacement":"    return [failed]"}]}'
+        response=SimpleNamespace(choices=[SimpleNamespace(finish_reason='stop',message=SimpleNamespace(content=content))])
+        self.assertEqual(parse_repair_response(response).line_edits[0].line,2)
+        response.choices[0].finish_reason='length'
+        with self.assertRaises(ValueError):
+            parse_repair_response(response)
+        response.choices[0].finish_reason='stop'
+        response.choices[0].message.content=content[:-1]
+        with self.assertRaises(ValueError):
+            parse_repair_response(response)

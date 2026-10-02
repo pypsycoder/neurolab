@@ -14,6 +14,15 @@ class CodeRepair(BaseModel):
     line_edits: list[LineReplacement] = Field(min_length=1, max_length=10)
 
 
+def parse_repair_response(response) -> CodeRepair:
+    if len(response.choices) != 1 or response.choices[0].finish_reason != 'stop':
+        raise ValueError('repair response did not finish normally')
+    content=response.choices[0].message.content
+    if not isinstance(content,str) or len(content.encode())>8000:
+        raise ValueError('repair output exceeds budget')
+    return CodeRepair.model_validate_json(content)
+
+
 def apply_line_repair(source: str, proposal: CodeRepair) -> str:
     lines = source.splitlines()
     seen = set()
