@@ -64,7 +64,7 @@ def main():
         if passed:
             source.replace(artifacts/f'candidate-{run_id}.py')
         else:
-            source.unlink()
+            source.replace(artifacts/f'failed-candidate-{run_id}.py')
         (artifacts/f'candidate-receipt-{run_id}.json').write_text(json.dumps(receipt,sort_keys=True)+'\n')
         (artifacts/'latest-candidate-receipt.json').write_text(json.dumps(receipt,sort_keys=True)+'\n')
         print(json.dumps(receipt,sort_keys=True))

@@ -37,3 +37,11 @@ per-call token accounting/central budget: это R7, continuous mode запре�
 (16kB, pending independent evaluation) и numeric self-score/usage; JSON/raw
 response не сохраняется. Тот же frozen evaluator определяет outcome, а при
 failure source удаляется, receipt остаётся. Ручного написания модели кода нет.
+
+Для bounded repair уточнение: AST-validated failed source разрешено сохранять
+как `failed-candidate-<run-id>.py`, максимум 16kB, только с `candidate_failed`
+receipt и hash. Это watchlist эксперимент, не accepted/promoted asset.
+Следующая модель получает лишь тот же validated spec, bounded previous source
+и failed case IDs/metrics; frozen tests и hidden DAG cases не раскрываются.
+`run_spec_code_cycle.sh` допускает максимум два новых proposal, прекращает
+работу при provider/runtime failure и никогда не меняет evaluator/production.
