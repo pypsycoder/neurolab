@@ -13,6 +13,7 @@ from gigachat.models import Chat, Messages
 from neurolab.experimental_spec import DraftSpec, canonical_json, content_hash
 from neurolab.experimental_code import build_code_task, validate_code_asset
 from neurolab.code_diagnostics import static_diagnostics
+from neurolab.code_repair import CodeRepair, apply_line_repair
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.gigachat_retry import bounded_gigachat_call, run_redacted_cli
 
@@ -53,9 +54,15 @@ def main():
                 raise ValueError('repair source integrity mismatch')
             previous_code=previous.read_text(encoding='utf-8')
             feedback['static_diagnostics']=static_diagnostics(previous)
-    prompt = '''Return a strict CodeProposal object with numeric self_score and complete Python source_lines.
+    response_schema = CodeRepair if previous_code else CodeProposal
+    output_contract = '''Return a strict CodeRepair object with numeric self_score and line_edits.
+Each edit replaces one existing source line: line is its 1-based number, replacement is the complete single line preserving indentation.
+Return only necessary changes, at most 10 unique lines. No added/deleted lines or embedded newlines.
+''' if previous_code else '''Return a strict CodeProposal object with numeric self_score and complete Python source_lines.
 source_lines is an array of single-line strings, preserving leading indentation spaces.
 Do not embed newlines inside a line. The adapter joins lines with a newline character.
+'''
+    prompt = output_contract + '''
 You have no tools and MUST NOT attempt tool calls; an adapter will write your validated code later.
 Do not claim that code was executed or tests passed. Do not wrap source in Markdown.
 Implement affected_nodes(edges: list[tuple[str,str]], failed: str) -> list[str].
@@ -73,9 +80,9 @@ No clinical/production action, merge or evaluator changes. Generate a feasible p
         if previous_code:
             prompt += '<PREVIOUS_UNTRUSTED_CODE>\n'+previous_code+'\n</PREVIOUS_UNTRUSTED_CODE>\n'
     with GigaChatClientFactory().create(settings) as client:
-        request = Chat(messages=[Messages(role='user',content=prompt)],temperature=0,max_tokens=4096)
+        request = Chat(messages=[Messages(role='user',content=prompt)],temperature=0,max_tokens=1024 if previous_code else 4096)
         try:
-            response, proposal = bounded_gigachat_call(lambda:client.chat_parse(request,response_format=CodeProposal,strict=True),max_retries=0)
+            response, proposal = bounded_gigachat_call(lambda:client.chat_parse(request,response_format=response_schema,strict=True),max_retries=0)
         except Exception as error:
             from gigachat.exceptions import LengthFinishReasonError
             if isinstance(error,LengthFinishReasonError):
@@ -85,10 +92,14 @@ No clinical/production action, merge or evaluator changes. Generate a feasible p
                 root.mkdir(parents=True,exist_ok=True)
                 (root/'latest-code-proposal-failure.json').write_text(json.dumps({'spec_run_id':str(args.spec_run_id),'status':'rejected_before_execution','reason':'provider_output_truncated','model_calls':1,'raw_code_retained':False,'usage':{key:getattr(usage,key,None) for key in ('prompt_tokens','completion_tokens','total_tokens')}})+'\n')
             raise
-    if any('\n' in line or '\r' in line or len(line)>200 for line in proposal.source_lines):
-        raise ValueError('source line boundary violated')
+    if previous_code:
+        candidate_source=apply_line_repair(previous_code,proposal)
+    else:
+        if any('\n' in line or '\r' in line or len(line)>200 for line in proposal.source_lines):
+            raise ValueError('source line boundary violated')
+        candidate_source='\n'.join(proposal.source_lines)+'\n'
     with tempfile.TemporaryDirectory() as temp:
-        directory=Path(temp); (directory/'provenance.py').write_text('\n'.join(proposal.source_lines)+'\n',encoding='utf-8')
+        directory=Path(temp); (directory/'provenance.py').write_text(candidate_source,encoding='utf-8')
         try:
             code, digest = validate_code_asset(directory)
         except Exception as error:

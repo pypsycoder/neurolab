@@ -52,3 +52,8 @@ Static Ruff 0.14.13 F821/F822/F823 дополняет frozen runtime tests, не
 message/path/source не сохраняются. Accepted требует 11/11 и отсутствия
 этих статических ошибок. Outcomes append-only с exact spec/evaluator/code
 hashes; passing source становится лишь candidate solution asset, не promoted.
+
+Если сохранён предыдущий AST-valid source, модель может вместо полной
+перегенерации вернуть CodeRepair: максимум 10 single-line replacements с
+1-based line number. Adapter меняет только выбранные моделью строки, без
+ручного исправления алгоритма, затем применяет тот же AST/Ruff/frozen gate.
