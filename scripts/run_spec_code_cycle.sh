@@ -15,7 +15,20 @@ for attempt in 1 2; do
   args=(--spec-run-id "$SPEC_RUN")
   [[ -z "$REPAIR_RUN" ]] || args+=(--repair-from "$REPAIR_RUN")
   RUN_STRUCTURED_CODE_CANDIDATE=1 bash scripts/run_structured_code_candidate.sh "${args[@]}"
-  if "$PY" scripts/verify_structured_code_candidate.py; then
+  evaluation_status=0
+  "$PY" scripts/verify_structured_code_candidate.py || evaluation_status=$?
+  FINAL_RUN="$("$PY" - "$ROOT/runtime/it-research/latest-candidate-receipt.json" <<'PY'
+import json, sys
+from pathlib import Path
+from uuid import UUID
+data=json.loads(Path(sys.argv[1]).read_text())
+if data.get('status') not in {'candidate_passed','candidate_failed'}:
+    raise SystemExit('Not a final independent outcome')
+print(UUID(data['run_id']))
+PY
+  )"
+  RUN_PERSIST_CODE_OUTCOME=1 bash scripts/persist_code_outcome.sh --run-id "$FINAL_RUN"
+  if [[ "$evaluation_status" == 0 ]]; then
     echo "spec_code_cycle: candidate_passed; attempts=$attempt; no deployment"
     exit 0
   fi

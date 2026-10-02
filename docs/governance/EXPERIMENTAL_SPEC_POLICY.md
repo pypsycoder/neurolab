@@ -35,8 +35,9 @@ per-call token accounting/central budget: это R7, continuous mode запре�
 через официальный GigaChat SDK без tools/agent shell. Это не подмена OpenHands
 для general repository coding: adapter сохраняет только AST-validated source
 (16kB, pending independent evaluation) и numeric self-score/usage; JSON/raw
-response не сохраняется. Тот же frozen evaluator определяет outcome, а при
-failure source удаляется, receipt остаётся. Ручного написания модели кода нет.
+response не сохраняется. Тот же frozen evaluator определяет outcome;
+failed source удерживается только по bounded repair policy ниже.
+Ручного написания модели кода нет.
 
 Для bounded repair уточнение: AST-validated failed source разрешено сохранять
 как `failed-candidate-<run-id>.py`, максимум 16kB, только с `candidate_failed`
@@ -45,3 +46,9 @@ receipt и hash. Это watchlist эксперимент, не accepted/promoted
 и failed case IDs/metrics; frozen tests и hidden DAG cases не раскрываются.
 `run_spec_code_cycle.sh` допускает максимум два новых proposal, прекращает
 работу при provider/runtime failure и никогда не меняет evaluator/production.
+
+Static Ruff 0.14.13 F821/F822/F823 дополняет frozen runtime tests, не меняет их.
+В feedback/БД разрешены лишь rule code и числовые line/column; raw lint
+message/path/source не сохраняются. Accepted требует 11/11 и отсутствия
+этих статических ошибок. Outcomes append-only с exact spec/evaluator/code
+hashes; passing source становится лишь candidate solution asset, не promoted.

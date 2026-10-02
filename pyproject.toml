@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
+    "ruff==0.14.13",
     "psycopg[binary]==3.2.6",
     "redis==5.2.1",
     "fastapi==0.115.8",

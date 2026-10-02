@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from gigachat.models import Chat, Messages
 from neurolab.experimental_spec import DraftSpec, canonical_json, content_hash
 from neurolab.experimental_code import build_code_task, validate_code_asset
+from neurolab.code_diagnostics import static_diagnostics
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.gigachat_retry import bounded_gigachat_call, run_redacted_cli
 
@@ -51,6 +52,7 @@ def main():
             if previous.is_symlink() or previous.stat().st_size>16000 or sha256(previous.read_bytes()).hexdigest()!=prior['code_sha256']:
                 raise ValueError('repair source integrity mismatch')
             previous_code=previous.read_text(encoding='utf-8')
+            feedback['static_diagnostics']=static_diagnostics(previous)
     prompt = '''Return a strict CodeProposal object with numeric self_score and complete Python source_lines.
 source_lines is an array of single-line strings, preserving leading indentation spaces.
 Do not embed newlines inside a line. The adapter joins lines with a newline character.
@@ -67,6 +69,7 @@ No clinical/production action, merge or evaluator changes. Generate a feasible p
 <SPECIFICATION>\n''' + canonical_json(draft) + '\n</SPECIFICATION>'
     if feedback:
         prompt += '\n<INDEPENDENT_FEEDBACK>\n'+json.dumps(feedback,sort_keys=True)+'\n</INDEPENDENT_FEEDBACK>\nThe previous proposal failed independent frozen tests. Repair it; do not change or bypass tests. Self-score is not proof. Recheck traversal, sorting, isolated nodes and acyclic validation across the entire graph.\n'
+        prompt += 'Static F821 means an undefined variable at the specified line/column. Python names are case-sensitive. Fix diagnostics in your own source and check all identifiers before returning.\n'
         if previous_code:
             prompt += '<PREVIOUS_UNTRUSTED_CODE>\n'+previous_code+'\n</PREVIOUS_UNTRUSTED_CODE>\n'
     with GigaChatClientFactory().create(settings) as client:

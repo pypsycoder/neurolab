@@ -9,6 +9,7 @@ import tempfile
 from uuid import UUID
 
 from neurolab.experimental_code import BASELINE, validate_code_asset
+from neurolab.code_diagnostics import static_diagnostics
 from run_experimental_code import command, require, IMAGE
 
 
@@ -53,12 +54,13 @@ def main():
             raise ValueError('baseline gate failed')
         target.write_bytes(source.read_bytes())
         code,digest=validate_code_asset(work)
+        receipt['static_diagnostics']=static_diagnostics(source)
         receipt['evaluation']=evaluate(code)
         receipt['code_executed']=True
         receipt['independent_score']=receipt['evaluation']['passed']/11
         if sha256(frozen.read_bytes()).hexdigest()!=receipt['evaluator_sha256']:
             raise ValueError('frozen evaluator changed')
-        passed=receipt['evaluation']['passed']==11
+        passed=receipt['evaluation']['passed']==11 and not receipt['static_diagnostics']
         receipt.update(status='candidate_passed' if passed else 'candidate_failed',decision='harvest_parts' if passed else 'repair',production_deployed=False,
             next_step='independent integration experiment' if passed else 'bounded repair from failed case IDs')
         if passed:

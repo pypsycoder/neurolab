@@ -90,6 +90,12 @@ Code agent не получает frozen tests или writable repo; первый
 No continuous run до R7 durable resume/shared budget; timeout/error нельзя
 превращать в success, а отсутствие token accounting — в нулевую стоимость.
 
+Для fixed provenance family использовать готовый Ruff static gate плюс
+неизменяемые frozen tests. Передавать модели failed case IDs и bounded
+rule/line/column diagnostics; не чинить модельный candidate вручную и не
+ослаблять тесты ради pass. Final outcomes записывать append-only в БД;
+passing asset остаётся candidate, не auto-promoted/production.
+
 ### Формат записи
 
 Добавить или заполнить запись в разделе «Журнал выполнения» `ROADMAP.md`:
