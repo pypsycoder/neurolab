@@ -92,10 +92,12 @@ gigachat_run_with_failover() {
     unset credential
     if ! _gigachat_is_transient_failure "$captured" "$status"; then
       echo "GigaChat $lane lane failed without an eligible failover." >&2
+      # Only our fixed failure protocol is printable, never arbitrary output.
+      grep -E '^(document_card|diagram_cards|response_replay|experimental_spec|code_candidate)_failed: (schema_validation_failure|code_contract_failure|provider_output_truncated|provider_authentication_failure|temporary_upload_cleanup_failure|contract_or_runtime_failure)$' <<<"$captured" >&2 || true
       return "$status"
     fi
     if [[ "$lane" == "primary" ]]; then
-      echo "GigaChat primary lane is rate-limited; switching once to freemium." >&2
+      echo "GigaChat primary lane is temporarily unavailable; switching once to freemium." >&2
       continue
     fi
     _gigachat_record_pause "$root" || return $?

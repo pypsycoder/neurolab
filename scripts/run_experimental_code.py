@@ -31,7 +31,7 @@ def command(args: list[str], *, timeout: int = 30, events: dict[str,int] | None 
     bounded = bytearray()
     def drain():
         pending = bytearray()
-        while chunk := process.stdout.read(4096):
+        while chunk := process.stdout.read1(4096):
             if len(bounded) < 16384:
                 bounded.extend(chunk[:16384 - len(bounded)])
             if events is not None:
@@ -39,6 +39,9 @@ def command(args: list[str], *, timeout: int = 30, events: dict[str,int] | None 
                 while b'\n' in pending:
                     line, _, rest = pending.partition(b'\n'); pending[:] = rest
                     observe_line(line,events)
+                    if events.get('ActionEvent',0) >= 8:
+                        events['action_budget_exhausted'] = 1
+                        process.kill()
                 if len(pending) > 65536:
                     observe_line(pending,events); pending.clear()
         if events is not None and pending:
@@ -100,7 +103,7 @@ def main():
         'boundary':'public_synthetic_experimental_only','agent':'OpenHands-CLI-1.16.0',
         'gateway':'gpt2giga-0.3.0','evaluator_sha256':frozen_hash,'status':'failed',
         'decision':'retire','production_deployed':False,'tokens_cost':'unavailable',
-        'budgets':{'agent_wall_seconds':300,'agent_memory_bytes':2147483648,'agent_cpus':2},
+        'budgets':{'agent_wall_seconds':300,'agent_memory_bytes':2147483648,'agent_cpus':2,'max_tool_actions':8},
         'self_score':None,'independent_score':None}
     work = Path(tempfile.mkdtemp(prefix='code-sandbox-',dir=artifact_root))
     work.chmod(0o755)

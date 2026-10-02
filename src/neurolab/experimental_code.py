@@ -9,6 +9,14 @@ BASELINE = 'def affected_nodes(edges, failed):\n    raise NotImplementedError("s
 MAX_CODE_BYTES = 16000
 
 
+class CodeContractError(ValueError):
+    def __init__(self, reason: str):
+        if reason not in {'write_allowlist','size','syntax','import','dynamic_access','introspection','interface'}:
+            raise ValueError('unknown code contract reason')
+        self.reason = reason
+        super().__init__('experimental code contract rejected')
+
+
 def build_code_task(draft: DraftSpec) -> str:
     return """Implement a tiny pure-Python experiment, not a production system.
 Edit ONLY /workspace/experiment/provenance.py. No other writable project path is authorized.
@@ -33,21 +41,24 @@ def validate_code_asset(directory: Path) -> tuple[bytes, str]:
     items = list(directory.iterdir())
     target = directory / "provenance.py"
     if len(items) != 1 or items[0] != target or target.is_symlink() or not target.is_file():
-        raise ValueError("experimental code write allowlist violated")
+        raise CodeContractError('write_allowlist')
     if target.stat().st_size > MAX_CODE_BYTES:
-        raise ValueError("experimental code exceeds budget")
+        raise CodeContractError('size')
     code = target.read_bytes()
-    tree = ast.parse(code.decode("utf-8"))
+    try:
+        tree = ast.parse(code.decode("utf-8"))
+    except (SyntaxError,UnicodeError):
+        raise CodeContractError('syntax') from None
     forbidden = {"open", "eval", "exec", "compile", "__import__", "getattr", "setattr", "delattr", "globals", "locals", "vars", "input", "breakpoint"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import) and any(item.name not in {"collections", "typing"} for item in node.names):
-            raise ValueError("experimental import is forbidden")
+            raise CodeContractError('import')
         if isinstance(node, ast.ImportFrom) and (node.module not in {"collections", "typing"} or node.level):
-            raise ValueError("experimental import is forbidden")
+            raise CodeContractError('import')
         if isinstance(node, ast.Name) and (node.id in forbidden or node.id.startswith("__")):
-            raise ValueError("experimental dynamic access is forbidden")
+            raise CodeContractError('dynamic_access')
         if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
-            raise ValueError("experimental introspection is forbidden")
+            raise CodeContractError('introspection')
     if not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "affected_nodes" for node in tree.body):
-        raise ValueError("experimental interface is absent")
+        raise CodeContractError('interface')
     return code, sha256(code).hexdigest()

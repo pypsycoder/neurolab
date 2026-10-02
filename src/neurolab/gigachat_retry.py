@@ -33,7 +33,12 @@ def run_redacted_cli(main: Callable[[], None], *, component: str) -> None:
     except Exception as error:
         import sys
         transient = is_transient_gigachat_error(error)
-        print(f"{component}_failed: {'provider_temporarily_unavailable' if transient else 'contract_or_runtime_failure'}", file=sys.stderr)
+        category = 'provider_temporarily_unavailable' if transient else {
+            'ValidationError':'schema_validation_failure','CodeContractError':'code_contract_failure',
+            'LengthFinishReasonError':'provider_output_truncated','AuthenticationError':'provider_authentication_failure',
+            'TemporaryUploadCleanupError':'temporary_upload_cleanup_failure',
+        }.get(type(error).__name__,'contract_or_runtime_failure')
+        print(f"{component}_failed: {category}", file=sys.stderr)
         raise SystemExit(75 if transient else 1) from None
 
 
