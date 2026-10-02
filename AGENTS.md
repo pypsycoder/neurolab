@@ -61,6 +61,10 @@ independent score, решение и следующий автоматическ
 Не сохранять prompt, raw model output, PDF/text/image, секреты или данные
 пациентов, если отдельная политика не разрешила их хранение.
 
+Bounded validated experimental ТЗ разрешено хранить только по
+`docs/governance/EXPERIMENTAL_SPEC_POLICY.md`. Оно не является reviewed
+evidence или разрешением clinical/prod/merge; raw prompt/transcript исключён.
+
 Более мощная внешняя модель может быть только независимым аудитором для
 redacted evaluation packet: она диагностирует деградацию и предлагает план,
 но не получает секреты/PHI, не меняет immutable policy и не может сама

@@ -361,6 +361,22 @@ diff». Артефакт должен быть повторяемым.
 
 ## 7. План восстановления и сборки полноценного исследовательского стека
 
+**Приёмка восстановления:** research image собран на ARM64; clean RP5 venv:
+138 tests OK / 3 opt-in skipped, shell failover contract passed. `.env` теперь
+принадлежит bimo и остаётся 0600/ignored; значения ключей не выводились.
+Проверенный backup `20261002-220122` (34 084 bytes) восстановлен в отдельную
+disposable БД (16 migrations); тестовая БД удалена, основная не менялась.
+`neurolab-backup.timer` включён, ежедневный запуск с Persistent=true.
+Это локальный NVMe backup, не защита от повторного отказа всего накопителя:
+off-device копирование требует отдельно выбранного места хранения.
+
+**Следующий исполняемый подэтап R5:** strict GigaChat structured draft по
+receipt-backed `needs_review`/`reviewed` public cards; запрещены unknown refs,
+неанализированные страницы, production/clinical boundary и arbitrary task
+family. Разрешён bounded validated spec artifact согласно
+`docs/governance/EXPERIMENTAL_SPEC_POLICY.md`; raw prompt/transcript не хранится.
+Foundation tests: 12 passed (spec/PDF/cleanup). Live draft ещё не выполнен.
+
 ### 7.1. Что фактически известно на 2026-10-02
 
 Владелец подтвердил новую установку RP5. GitHub `pypsycoder/neurolab`,
