@@ -8,7 +8,7 @@ from typing import TypeVar
 
 
 T = TypeVar("T")
-_RETRYABLE_NAMES = frozenset({"RateLimitError", "TimeoutError", "ConnectTimeout"})
+_RETRYABLE_NAMES = frozenset({"RateLimitError", "TimeoutError", "ConnectTimeout", "ReadTimeout", "WriteTimeout", "PoolTimeout"})
 
 
 class GigaChatRetryError(RuntimeError):

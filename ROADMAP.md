@@ -363,6 +363,8 @@ diff». Артефакт должен быть повторяемым.
 
 ## 7. План восстановления и сборки полноценного исследовательского стека
 
+| 2026-10-02 | R4–R6 — live text card, engineering assets и memory cgroup | в работе | GigaChat создал и сохранил новую 7-page document card: 4 окна + синтез. OpenHands CLI 1.16.0 ARM64 скачан с официального release, SHA256 совпал; gpt2giga 0.3.0 image собран. После backup boot-file добавлен только `cgroup_enable=memory`; после reboot Docker `MemoryLimit=true`, cgroup v2 содержит memory, все 6 сервисов снова работают, HTTP 200. | Новая БД: 10 sources, 1 document, 1 document card, 0 diagram cards. Windows: 149 tests OK / 3 skipped; frozen evaluator отклоняет broken baseline 0/11. | Diagram пока не прошёл; первый spec запрос получил ReadTimeout, не 429. Добавлены HTTPX timeout types в transient classifier и 120s ожидание для spec/Vision. Code runner использует отдельные RO tests, network-none evaluator, 2GiB agent memory и allowlist; live code pass ещё не заявлен. | Повторить strict draft с redacted receipt; из него выполнить один isolated code/test цикл. R7 persistent resume/token budgets остаются отдельным незавершённым этапом. |
+
 **Приёмка восстановления:** research image собран на ARM64; clean RP5 venv:
 138 tests OK / 3 opt-in skipped, shell failover contract passed. `.env` теперь
 принадлежит bimo и остаётся 0600/ignored; значения ключей не выводились.

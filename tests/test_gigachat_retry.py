@@ -10,6 +10,10 @@ class RateLimitError(Exception):
 
 
 class GigaChatRetryTests(unittest.TestCase):
+    def test_httpx_read_timeout_is_transient_without_message_matching(self):
+        import httpx
+        self.assertTrue(is_transient_gigachat_error(httpx.ReadTimeout('private response')))
+
     def test_http_status_not_provider_text_controls_retry(self):
         error = RuntimeError("429 in a document is not a provider status")
         self.assertFalse(is_transient_gigachat_error(error))

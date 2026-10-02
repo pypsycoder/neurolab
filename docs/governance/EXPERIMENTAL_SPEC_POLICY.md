@@ -20,3 +20,13 @@ test evaluator; самооценка GigaChat не делает promotion.
 
 Следующие task families вводятся версионированной policy с frozen acceptance
 tests. Успех этого DAG не доказывает пригодность всего НейроЛаба или статьи.
+
+Разрешено хранить один прошедший независимую проверку bounded code asset
+(`candidate-<run-id>.py`, максимум 16kB) и redacted JSON receipt: hashes,
+baseline/after cases, memory/wall budgets, decision и следующий шаг.
+Raw agent events, prompts, provider logs и ephemeral proxy env удаляются;
+Docker log driver `none`. Результат — `harvest_parts`, не auto-merge/prod.
+Тесты не монтируются code agent; evaluator запускается network-none с RO
+candidate mount. Обязателен реальный memory cgroup, а не только Docker flag.
+Первый runner ограничивает wall time, CPU/RAM/PIDs, но пока не обеспечивает
+per-call token accounting/central budget: это R7, continuous mode запрещён.
