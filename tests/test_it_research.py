@@ -125,6 +125,14 @@ class ItResearchPipelineTests(unittest.TestCase):
         self.assertEqual(item.authors, ("Ada Example",))
         self.assertIn("fallback", item.limitations[1])
 
+    def test_unversioned_arxiv_resolves_to_pinned_version_not_another_paper(self):
+        entry = b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/2509.00001v2</id><title>Synthetic provenance workflow</title><published>2025-09-15T00:00:00Z</published></entry></feed>'
+        item = lookup_arxiv_identifier("2509.00001", transport=lambda *_: entry)
+        self.assertEqual(item.provider_id, "2509.00001v2")
+        for requested in ("2509.00001v1", "2509.00002"):
+            with self.assertRaises(ItResearchError):
+                lookup_arxiv_identifier(requested, transport=lambda *_: entry)
+
     def test_targeted_openalex_lookup_accepts_only_exact_doi(self):
         response = json.dumps({
             "id": "https://openalex.org/W123",

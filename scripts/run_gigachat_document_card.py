@@ -20,7 +20,7 @@ from neurolab.document_cards import (
     plan_page_windows,
 )
 from neurolab.gigachat_retry import GigaChatRetryError, bounded_gigachat_call, run_redacted_cli
-from neurolab.fulltext_verification import OpenAccessPdfRequest, _extract_pdf, default_pdf_transport
+from neurolab.fulltext_verification import OpenAccessPdfRequest, extract_open_access_pdf, default_pdf_transport
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.research_storage import load_document_identity, persist_document_card
 
@@ -100,7 +100,7 @@ def main() -> None:
     request = OpenAccessPdfRequest(identity.source_key, arguments.arxiv_id, identity.license_id)
     if request.url != identity.document_url:
         raise RuntimeError("arXiv identifier does not match the stored document receipt")
-    receipt, page_texts = _extract_pdf(request, transport=default_pdf_transport)
+    receipt, page_texts = extract_open_access_pdf(request, transport=default_pdf_transport)
     if receipt.sha256 != identity.document_sha256 or receipt.page_count != identity.page_count:
         raise RuntimeError("retrieved PDF does not match the stored document receipt")
     windows = plan_page_windows(page_texts, pages_per_window=arguments.pages_per_window)

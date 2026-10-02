@@ -368,7 +368,14 @@ def lookup_arxiv_identifier(
     identifier = _clean_text(entry.findtext(f"{atom}id"))
     provider_id = identifier.rsplit("/", 1)[-1]
     title = _clean_text(entry.findtext(f"{atom}title"))
-    if provider_id != arxiv_id or not title:
+    # An unversioned request resolves to the latest version. Pin that returned
+    # version; an explicit version must still match exactly. Never accept a
+    # different paper, malformed ID or an error entry.
+    identifier_matches = provider_id == arxiv_id or (
+        "v" not in arxiv_id and _ARXIV_ID.fullmatch(provider_id)
+        and provider_id.split("v", 1)[0] == arxiv_id
+    )
+    if not identifier_matches or not title:
         raise ItResearchError("arXiv record does not match the requested identifier")
     authors = tuple(
         name for author in entry.findall(f"{atom}author") if (name := _clean_text(author.findtext(f"{atom}name")))

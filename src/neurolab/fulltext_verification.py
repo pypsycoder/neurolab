@@ -104,6 +104,16 @@ def verify_open_access_pdf(
     transport: Callable[[str], PdfResponse] = default_pdf_transport,
 ) -> FullTextReceipt:
     """Extract bounded text in memory and return a receipt without retaining content."""
+    receipt, _ = extract_open_access_pdf(request, transport=transport)
+    return receipt
+
+
+def extract_open_access_pdf(
+    request: OpenAccessPdfRequest,
+    *,
+    transport: Callable[[str], PdfResponse] = default_pdf_transport,
+) -> tuple[FullTextReceipt, tuple[str, ...]]:
+    """Share the same limits with card analysis; page text stays transient in memory."""
     response = transport(request.url)
     if response.content_type != "application/pdf":
         raise FullTextVerificationError("response is not a PDF")
@@ -116,14 +126,15 @@ def verify_open_access_pdf(
         reader = PdfReader(BytesIO(response.payload), strict=True)
         if len(reader.pages) > _MAX_PDF_PAGES:
             raise FullTextVerificationError("PDF exceeds the page limit")
-        text = "".join((page.extract_text() or "") for page in reader.pages)
+        page_texts = tuple(page.extract_text() or "" for page in reader.pages)
+        text = "".join(page_texts)
     except FullTextVerificationError:
         raise
     except Exception as error:
         raise FullTextVerificationError("PDF text extraction failed") from error
     if len(text) > _MAX_EXTRACTED_CHARS:
         raise FullTextVerificationError("extracted PDF text exceeds the limit")
-    return FullTextReceipt(
+    receipt = FullTextReceipt(
         source_key=request.source_key,
         provider="arxiv",
         document_url=request.url,
@@ -134,3 +145,4 @@ def verify_open_access_pdf(
         extracted_text_sha256=sha256(text.encode("utf-8")).hexdigest(),
         extracted_character_count=len(text),
     )
+    return receipt, page_texts
