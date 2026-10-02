@@ -12,6 +12,9 @@ MAX_CODE_BYTES = 16000
 def build_code_task(draft: DraftSpec) -> str:
     return """Implement a tiny pure-Python experiment, not a production system.
 Edit ONLY /workspace/experiment/provenance.py. No other writable project path is authorized.
+You MUST use a terminal or file-editor tool to change that file on disk. A prose response
+or a code block alone is not implementation and will fail independent evaluation.
+Your current directory /workspace/experiment is writable; its parent is read-only.
 Implement affected_nodes(edges: list[tuple[str,str]], failed: str) -> list[str].
 Return sorted unique descendants including failed; an isolated failed node returns [failed].
 Deduplicate edges. Reject ANY cycle with ValueError, including a disconnected cycle or self-loop.

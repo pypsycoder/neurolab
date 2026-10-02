@@ -23,7 +23,9 @@ jobs:
       - name: Verify shell failover and script syntax
         run: |
           bash tests/test_gigachat_failover.sh scripts/lib/gigachat_failover.sh "$(command -v python)"
-          find scripts -name '*.sh' -exec bash -n {} \;
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+          done < <(find scripts -name '*.sh' -print0)
       - name: Validate Compose configuration
         run: |
           cp .env.example .env

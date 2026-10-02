@@ -1,12 +1,15 @@
 """Negative contracts for the bounded open-access PDF verifier."""
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from neurolab.fulltext_verification import (
     FullTextVerificationError,
     OpenAccessPdfRequest,
     PdfResponse,
     verify_open_access_pdf,
+    extract_open_access_pdf,
 )
 
 
@@ -14,6 +17,24 @@ SOURCE_KEY = "a" * 64
 
 
 class FullTextVerificationTests(unittest.TestCase):
+    def test_card_extraction_preserves_page_text_and_receipt(self):
+        request = OpenAccessPdfRequest(SOURCE_KEY, '2501.12345v2', 'CC-BY-4.0')
+        texts = (' first page\n', 'second page ' * 2000, '')
+        reader = SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda text=text: text) for text in texts])
+        transport = lambda _: PdfResponse('application/pdf', b'%PDF-synthetic')
+        with patch('pypdf.PdfReader',return_value=reader):
+            receipt, pages = extract_open_access_pdf(request,transport=transport)
+            self.assertEqual(verify_open_access_pdf(request,transport=transport),receipt)
+        self.assertEqual(pages,texts)
+        self.assertEqual(receipt.extracted_character_count,sum(map(len,texts)))
+
+    def test_card_extraction_shares_page_and_character_budgets(self):
+        request = OpenAccessPdfRequest(SOURCE_KEY, '2501.12345v2', 'CC-BY-4.0')
+        for texts in (['text']*101,['x'*1_000_001]):
+            reader = SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda text=text: text) for text in texts])
+            with patch('pypdf.PdfReader',return_value=reader), self.assertRaises(FullTextVerificationError):
+                extract_open_access_pdf(request,transport=lambda _:PdfResponse('application/pdf',b'%PDF-synthetic'))
+
     def test_request_rejects_arbitrary_identifier_and_unknown_license(self):
         with self.assertRaises(FullTextVerificationError):
             OpenAccessPdfRequest(SOURCE_KEY, "https://example.test/document.pdf", "CC-BY-4.0")

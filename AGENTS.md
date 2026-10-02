@@ -84,6 +84,12 @@ Git diff, Compose, migration ledger, backup и count research artifacts.
 наличия старого card ID. Работать по разделу 7 ROADMAP без подтверждения
 каждого synthetic подэтапа; clinical/prod границы остаются неизменными.
 
+Перед paid model call проверять импорты CLI в offline regression suite.
+Code agent не получает frozen tests или writable repo; первый эксперимент
+запускается только через isolated runner с проверенным `memory.max`.
+No continuous run до R7 durable resume/shared budget; timeout/error нельзя
+превращать в success, а отсутствие token accounting — в нулевую стоимость.
+
 ### Формат записи
 
 Добавить или заполнить запись в разделе «Журнал выполнения» `ROADMAP.md`:

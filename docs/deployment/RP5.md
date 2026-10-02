@@ -11,8 +11,10 @@
 - На устройстве уже работает **основной стек НейроЛаба** — Docker Compose
   проект `neuro-lab` в `/opt/neuro-lab` с PostgreSQL, Redis, orchestrator,
   monitor и dashboard. Он является целевой рабочей копией проекта.
-- Контейнер `sing-box` остаётся отдельным соседним сервисом и не является
-  целью операций НейроЛаба.
+- После замены накопителя внешний трафик обеспечивается постоянным Throne
+  SSH/VPS tunnel, Tailscale использует восстановленный proxy profile.
+  `sing-box` не активен; не переносить старые предположения на новый runtime.
+  Ни один из сетевых сервисов не является целью операций NeuroLab rollout.
 
 ## Привязка GitHub к существующей рабочей копии
 
@@ -50,3 +52,40 @@ NEUROLAB_ENV_FILE=/локальный/путь/.env ./scripts/verify_gigachat_li
 только после отдельной проверки и явной необходимости. Не выполнять `git
 reset`, `git clean`, `docker compose down`, `docker system prune` или замену
 `.env` при подключении GitHub.
+
+## Восстановленный runtime (2026-10-02)
+
+RP5: Python 3.13, Docker/Compose, NVMe ext4. Секреты в `/opt/neuro-lab/.env`
+0600, владелец bimo; значения не копируются на Windows или в Git.
+Research — opt-in Compose profile, официальный GigaChat SDK; CA bundle
+создаётся `scripts/prepare_research_ca.sh` только в ignored runtime.
+OpenHands CLI 1.16.0 ARM64 + gpt2giga 0.3.0 восстанавливаются
+`scripts/install_engineering_runtime.sh` с проверкой release checksum.
+
+После точечного включения `cgroup_enable=memory` и проверенного reboot Docker
+обеспечивает memory limit. Code runner проверяет реальный `memory.max` перед
+исполнением; при отсутствии контроля памяти запуск запрещается.
+Тесты readonly и не монтируются агенту, evaluator network-none;
+agent имеет доступ только к ephemeral GigaChat proxy, не к host env/socket.
+
+Определённые команды доступны только в synthetic-only контуре:
+
+```bash
+cd /opt/neuro-lab
+.venv/bin/python scripts/rp5_healthcheck.py
+sudo env RUN_EXPERIMENTAL_SPEC=1 \
+  NEUROLAB_SSL_CERT_FILE=/opt/neuro-lab/runtime/ca/ca-certificates.crt \
+  bash scripts/run_experimental_spec.sh
+sudo env RUN_EXPERIMENTAL_CODE=1 bash scripts/run_experimental_code.sh \
+  --spec /opt/neuro-lab/runtime/it-research/spec-<run-id>.json
+```
+
+Не запускать последний пример с placeholder: использовать существующий
+receipt-backed run ID. Существующий `latest-spec-receipt.json` должен совпасть
+с hash и ID спецификации. Raw agent transcripts не сохраняются; только
+bounded validated spec, accepted candidate и machine receipts по policy.
+Текущие результаты и дальнейшая работа — только в корневом `ROADMAP.md`.
+
+`neurolab-backup.timer` включён; backup/restore проверяется в отдельной
+disposable БД. Пока backup находится на том же NVMe: это не disk-failure
+recovery. Off-device backup и непрерывный autonomous scheduler ещё не приняты.

@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from dotenv import dotenv_values
 from neurolab.experimental_code import BASELINE, build_code_task, validate_code_asset
+from neurolab.agent_event_metadata import observe_line
 from neurolab.experimental_spec import DraftSpec, content_hash
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,14 +25,24 @@ IMAGE = 'neurolab/gpt2giga-eval:v0.3.0'
 CLI_SHA = '67c5cfb94e5fd4c4120eb0360b0f23337da31f64a70e8496bcf008e4caeea6af'
 
 
-def command(args: list[str], *, timeout: int = 30) -> tuple[int, bytes]:
+def command(args: list[str], *, timeout: int = 30, events: dict[str,int] | None = None) -> tuple[int, bytes]:
     """Drain output with constant memory. Never persist provider logs/transcripts."""
     process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     bounded = bytearray()
     def drain():
+        pending = bytearray()
         while chunk := process.stdout.read(4096):
             if len(bounded) < 16384:
                 bounded.extend(chunk[:16384 - len(bounded)])
+            if events is not None:
+                pending.extend(chunk)
+                while b'\n' in pending:
+                    line, _, rest = pending.partition(b'\n'); pending[:] = rest
+                    observe_line(line,events)
+                if len(pending) > 65536:
+                    observe_line(pending,events); pending.clear()
+        if events is not None and pending:
+            observe_line(pending,events)
     reader = Thread(target=drain, daemon=True); reader.start()
     try:
         code = process.wait(timeout=timeout)
@@ -158,6 +169,7 @@ def main():
         if not ready:
             raise RuntimeError('isolated gateway not ready')
         receipt['phase'] = 'agent_run'
+        events: dict[str,int] = {}
         code,agent_output = command(['docker','run','--rm','--name',agent,'--network',agent_network,'--user','1000:1000',
             *security,'--memory','2g','--memory-swap','2g',
             '--tmpfs','/tmp:rw,noexec,nosuid,size=64m','--tmpfs','/home/agent:rw,nosuid,size=32m,uid=1000,gid=1000',
@@ -167,10 +179,11 @@ def main():
             '-e','PYTHONDONTWRITEBYTECODE=1','-e','OPENHANDS_SUPPRESS_BANNER=1',
             '-e',f'LLM_API_KEY={proxy_key}','-e','LLM_BASE_URL=http://gpt2giga:8090/v1','-e',f'LLM_MODEL=openai/{model}',
             '-v',f'{cli}:/openhands:ro','-v',f'{workspace}:/workspace:ro','-v',f'{experiment}:/workspace/experiment:rw',
-            '-w','/workspace','--entrypoint','/openhands',IMAGE,'--headless','--json','--always-approve',
-            '--exit-without-confirmation','--override-with-envs','--task',build_code_task(draft)],timeout=300)
+            '-w','/workspace/experiment','--entrypoint','/openhands',IMAGE,'--headless','--json','--always-approve',
+            '--exit-without-confirmation','--override-with-envs','--task',build_code_task(draft)],timeout=300,events=events)
         receipt['agent_exit_code'] = code
-        receipt['provider_temporarily_unavailable'] = any(marker in agent_output for marker in (b'RateLimitError',b'ReadTimeout',b'ConnectTimeout',b'"status_code": 429',b'"status_code":429'))
+        receipt['agent_event_counts'] = events
+        receipt['provider_temporarily_unavailable'] = any(events.get(marker,0) for marker in ('RateLimitError','ReadTimeout','ConnectTimeout'))
         # Timeout/client termination alone does not kill a Docker container.
         command(['docker','rm','-f',agent])
         receipt['phase'] = 'independent_evaluation'
@@ -178,6 +191,7 @@ def main():
         result = evaluate(); receipt['evaluation'] = result
         receipt['independent_score'] = result['passed']/result['total']
         receipt['code_sha256'] = asset_hash
+        receipt['code_changed'] = asset != BASELINE.encode()
         if sha256(frozen.read_bytes()).hexdigest() != frozen_hash:
             raise ValueError('immutable evaluator changed')
         if code == 0 and result['passed'] == result['total']:
