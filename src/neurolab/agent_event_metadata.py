@@ -28,7 +28,7 @@ def observe_line(line: bytes, counts: dict[str,int]) -> None:
     if isinstance(tool,str) and tool in TOOLS:
         counts['tool:'+tool] = min(1000,counts.get('tool:'+tool,0)+1)
     action = value.get('action')
-    if isinstance(action,dict) and action.get('command') in EDITOR_COMMANDS:
+    if isinstance(action,dict) and isinstance(action.get('command'),str) and action['command'] in EDITOR_COMMANDS:
         label = 'editor:'+action['command']
         counts[label] = min(1000,counts.get(label,0)+1)
     observation = value.get('observation')

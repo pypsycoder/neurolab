@@ -18,8 +18,8 @@ from neurolab.gigachat_retry import bounded_gigachat_call, run_redacted_cli
 
 class CodeProposal(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    source_code: str = Field(min_length=30,max_length=6000,description='Complete compact Python source, at most 60 lines, no comments/docstrings, only the affected_nodes function and optional collections/typing imports.')
     self_score: float = Field(ge=0,le=1)
+    source_lines: list[str] = Field(min_length=2,max_length=60,description='Complete Python source as an array of single lines, preserving leading spaces. No comments/docstrings. Only affected_nodes function and optional collections/typing imports. Each line at most 200 characters.')
 
 
 def main():
@@ -35,7 +35,9 @@ def main():
     if content_hash(draft) != row[1]:
         raise ValueError('specification hash mismatch')
     settings = GigaChatSettings.from_environment()
-    prompt = '''Return a strict CodeProposal object with complete Python source_code and a numeric self_score.
+    prompt = '''Return a strict CodeProposal object with numeric self_score and complete Python source_lines.
+source_lines is an array of single-line strings, preserving leading indentation spaces.
+Do not embed newlines inside a line. The adapter joins lines with a newline character.
 You have no tools and MUST NOT attempt tool calls; an adapter will write your validated code later.
 Do not claim that code was executed or tests passed. Do not wrap source in Markdown.
 Implement affected_nodes(edges: list[tuple[str,str]], failed: str) -> list[str].
@@ -49,9 +51,21 @@ No clinical/production action, merge or evaluator changes. Generate a feasible p
 <SPECIFICATION>\n''' + canonical_json(draft) + '\n</SPECIFICATION>'
     with GigaChatClientFactory().create(settings) as client:
         request = Chat(messages=[Messages(role='user',content=prompt)],temperature=0,max_tokens=4096)
-        response, proposal = bounded_gigachat_call(lambda:client.chat_parse(request,response_format=CodeProposal,strict=True),max_retries=0)
+        try:
+            response, proposal = bounded_gigachat_call(lambda:client.chat_parse(request,response_format=CodeProposal,strict=True),max_retries=0)
+        except Exception as error:
+            from gigachat.exceptions import LengthFinishReasonError
+            if isinstance(error,LengthFinishReasonError):
+                completion=error.completion
+                usage=getattr(completion,'usage',None)
+                root=Path(__file__).resolve().parents[1]/'runtime/it-research'
+                root.mkdir(parents=True,exist_ok=True)
+                (root/'latest-code-proposal-failure.json').write_text(json.dumps({'spec_run_id':str(args.spec_run_id),'status':'rejected_before_execution','reason':'provider_output_truncated','model_calls':1,'raw_code_retained':False,'usage':{key:getattr(usage,key,None) for key in ('prompt_tokens','completion_tokens','total_tokens')}})+'\n')
+            raise
+    if any('\n' in line or '\r' in line or len(line)>200 for line in proposal.source_lines):
+        raise ValueError('source line boundary violated')
     with tempfile.TemporaryDirectory() as temp:
-        directory=Path(temp); (directory/'provenance.py').write_text(proposal.source_code,encoding='utf-8')
+        directory=Path(temp); (directory/'provenance.py').write_text('\n'.join(proposal.source_lines)+'\n',encoding='utf-8')
         try:
             code, digest = validate_code_asset(directory)
         except Exception as error:
