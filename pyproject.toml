@@ -11,6 +11,16 @@ dependencies = [
     "gigachat==0.2.3",
     "langgraph==1.2.11",
     "mcp==2.2.0",
+    "python-dotenv==1.1.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "psycopg[binary]==3.2.6",
+    "redis==5.2.1",
+    "fastapi==0.115.8",
+    "pypdf==6.18.1",
+    "sse-starlette==3.0.3",
 ]
 
 [tool.setuptools.packages.find]

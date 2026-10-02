@@ -15,6 +15,7 @@ from neurolab.evaluator_storage import (
     persist_solution_outcomes,
 )
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
+from neurolab.gigachat_retry import run_redacted_cli
 from neurolab.gigachat_response_replay import request_synthetic_replay
 from neurolab.response_replay_memory import response_replay_outcome, response_replay_prompt_asset
 from neurolab.response_replay_diagnostics import diagnostic_summary, diagnose_response_quality
@@ -61,4 +62,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_redacted_cli(main, component="response_replay")

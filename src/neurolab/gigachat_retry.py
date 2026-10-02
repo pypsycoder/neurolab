@@ -15,6 +15,28 @@ class GigaChatRetryError(RuntimeError):
     """A bounded transient retry budget was exhausted without exposing provider data."""
 
 
+def is_transient_gigachat_error(error: Exception) -> bool:
+    """Inspect status/type only, never arbitrary provider bodies or messages."""
+    if isinstance(error, GigaChatRetryError) or error.__class__.__name__ in _RETRYABLE_NAMES:
+        return True
+    response = getattr(error, "response", None)
+    status = getattr(error, "status_code", None) or getattr(response, "status_code", None)
+    return status in {429, 502, 503, 504}
+
+
+def run_redacted_cli(main: Callable[[], None], *, component: str) -> None:
+    """A stable exit-code protocol for wrappers; do not print raw exceptions."""
+    if component not in {"document_card", "diagram_cards", "response_replay", "experimental_spec"}:
+        raise ValueError("unknown CLI component")
+    try:
+        main()
+    except Exception as error:
+        import sys
+        transient = is_transient_gigachat_error(error)
+        print(f"{component}_failed: {'provider_temporarily_unavailable' if transient else 'contract_or_runtime_failure'}", file=sys.stderr)
+        raise SystemExit(75 if transient else 1) from None
+
+
 def bounded_gigachat_call(
     call: Callable[[], T], *, max_retries: int = 2, sleep: Callable[[float], None] = _sleep
 ) -> T:
@@ -25,7 +47,7 @@ def bounded_gigachat_call(
         try:
             return call()
         except Exception as error:
-            if error.__class__.__name__ not in _RETRYABLE_NAMES:
+            if not is_transient_gigachat_error(error):
                 raise
             if attempt == max_retries:
                 raise GigaChatRetryError("GigaChat is temporarily unavailable after bounded retry") from None

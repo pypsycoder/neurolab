@@ -1,6 +1,8 @@
 import unittest
 
-from neurolab.gigachat_retry import GigaChatRetryError, bounded_gigachat_call
+from neurolab.gigachat_retry import GigaChatRetryError, bounded_gigachat_call, is_transient_gigachat_error, run_redacted_cli
+from contextlib import redirect_stderr
+from io import StringIO
 
 
 class RateLimitError(Exception):
@@ -8,6 +10,24 @@ class RateLimitError(Exception):
 
 
 class GigaChatRetryTests(unittest.TestCase):
+    def test_http_status_not_provider_text_controls_retry(self):
+        error = RuntimeError("429 in a document is not a provider status")
+        self.assertFalse(is_transient_gigachat_error(error))
+        error.status_code = 429
+        self.assertTrue(is_transient_gigachat_error(error))
+        error.status_code = 401
+        self.assertFalse(is_transient_gigachat_error(error))
+
+    def test_cli_exit_protocol_never_prints_raw_error(self):
+        for error, code in ((RateLimitError("secret-body"), 75), (ValueError("secret-body"), 1)):
+            def fail():
+                raise error
+            captured = StringIO()
+            with redirect_stderr(captured), self.assertRaises(SystemExit) as stopped:
+                run_redacted_cli(fail, component="document_card")
+            self.assertEqual(stopped.exception.code, code)
+            self.assertNotIn("secret-body", captured.getvalue())
+
     def test_rate_limit_retries_with_bounded_backoff(self):
         attempts = []
         waits = []

@@ -19,7 +19,7 @@ from neurolab.document_cards import (
     parse_window_note,
     plan_page_windows,
 )
-from neurolab.gigachat_retry import GigaChatRetryError, bounded_gigachat_call
+from neurolab.gigachat_retry import GigaChatRetryError, bounded_gigachat_call, run_redacted_cli
 from neurolab.fulltext_verification import OpenAccessPdfRequest, _extract_pdf, default_pdf_transport
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.research_storage import load_document_identity, persist_document_card
@@ -146,7 +146,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except (GigaChatRetryError, RuntimeError, ValueError) as error:
-        raise SystemExit(f"document_card_failed: {error}")
+    run_redacted_cli(main, component="document_card")

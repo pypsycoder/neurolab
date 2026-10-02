@@ -1,7 +1,8 @@
 # НейроЛаб — дорожная карта
 
-**Версия:** 0.1  
+**Версия:** 0.2
 **Создана:** 2026-09-13  
+**Актуализация:** 2026-10-02, восстановление после нового накопителя RP5
 **Назначение:** от проверяемых интеграций GigaChat, gpt2giga, Hermes,
 OpenHands, LangGraph и MCP — к безопасной клинической системе поддержки
 пациентов на гемодиализе.
@@ -348,7 +349,85 @@ diff». Артефакт должен быть повторяемым.
 | 2026-09-18 | 2.52 — redacted diagnostics и сравнение prompt variants | выполнен | Добавлен immutable per-case diagnostic receipt: допустимы только `case_id`, `pass/fail` и четыре заранее заданных reason codes; prompts и ответы не сохраняются. V1 сохранён без изменения; создан отдельный v2 prompt asset. На одном frozen cohort оба варианта прошли live GigaChat replay в shadow. | Migration `20260918_16` применена. 15 container tests прошли. V1: 4 calls, `primary=0.50`, `safety=0.75`, `calibration=0.75`, 3 failed cases; aggregate codes: forbidden=1, missing-required=2, missing-uncertainty=1. V2: 4 calls, `primary=0.75`, `safety=1.00`, `calibration=1.00`, 1 failed case; aggregate code: missing-required=1. Cohort и evaluator definition hash совпадают. | V2 снимает safety regression, но не достигает порога primary `0.80`; outcome `failure`, v2 asset остаётся `watchlist` без auto-promotion. Это lexical contract smoke, а не доказательство полезности или клинического качества; нельзя бесконечно подгонять prompt под один frozen набор. | Сформировать независимый semantic response-quality evaluator и расширенный frozen holdout до следующего изменения prompt; затем сравнивать candidate только на неиспользованном holdout. |
 | 2026-09-18 | 2.53 — sealed semantic holdout gate | выполнен | Добавлен `semantic_holdout_v1`: 20 opaque case IDs, отдельный shadow evaluator и verifier для HMAC-подписанной aggregate receipt. Holdout content, model answers, per-case verdicts и rationale не принимаются и не сохраняются; verifier требует distinct hash judge/candidate model и точное совпадение candidate artifact/model. Отдельный protocol зафиксирован в `docs/governance/SEALED_HOLDOUT_PROTOCOL.md`. | 14 container tests прошли: normal signed aggregate, invalid signature, candidate mismatch и same-model refusal; research image собран с verifier CLI; `git diff --check` пройден. | Независимый judge и sealed ключ намеренно не сконфигурированы в обычном RP5/Code Agent environment, поэтому live semantic result не заявляется и не записывается. Это fail-closed boundary, а не замена внешнего evaluator. | Развернуть отдельный evaluator environment с genuinely distinct judge model и sealed key, затем провести первый signed shadow run для exact candidate artifact; до этого не менять v2 и не пытаться автоматически достичь порога на публичном 4-case наборе. |
 | 2026-09-20 | 2.54 — первый public evidence cycle и GigaChat failover | выполнен | Из bounded arXiv queue выбран первый приоритетный source. Exact route подтвердил CC-BY-4.0, 7-page PDF и persistent license/document receipts; GigaChat создал одну `needs_review` document card и шесть `needs_review` diagram cards. Для live wrappers добавлен controlled failover `primary → freemium`; при transient `429`/timeout обеих линий создаётся 15-минутная research pause без новых provider calls. | Queue: 7 metadata-only candidates. Первый source: 698 857 bytes, 7 pages, 35 799 extracted chars; raw PDF/text не хранятся. 15 Python tests и shell-contract подтвердили bounded retry, lane switch, pause и отсутствие вызова во время pause. Первый card-run выявил invalid `finding.kind`; JSON-schema tightened до локального allowlist. Следующий retry встретил `429`; secondary lane завершила card-run. | Card/diagram outputs — hypotheses и не переходят в `content_verified`, claim или clinical/production action. Первый 429 не вызвал бесконечных повторов; раньше wrappers использовали только primary, теперь переключение строго однократное. | Создать отдельный `experimental-only` evidence-to-draft-spec route: он может использовать unreviewed public cards лишь для sandboxed engineering task, должен явно маркировать неопределённость и не иметь пути в clinical/production контур; затем запустить первый draft-ТЗ → isolated code/test cycle. |
-## 7. Правило обновления
+| Дата (YYYY-MM-DD) | Этап / подэтап | Статус | Фактический результат | Тесты / доказательства | Проблемы и решения | Следующий шаг |
+|---|---|---|---|---|---|---|
+| 2026-09-30 | RP5 — восстановление после отказа накопителя (запись владельца) | выполнен | На NVMe клонирован `main` (`a6d8a1a`), установлен Docker/Compose, созданы новые PostgreSQL/Redis volumes и закрытый `.env`; запущены dashboard, monitor и две реплики orchestrator. Ключи GigaChat добавлены пользователем локально на Pi; `OPENROUTER_ENABLED=false`. | По сохранённой записи: 16 migrations, HTTP 200, два коротких GigaChat-2 probe по primary/freemium. | Старой БД и её backup нет. OpenRouter key существует отдельно в root-only secrets, в containers не передаётся и не используется. Запись сохранена при объединении изменений RP5; приватные реквизиты не публикуются. | Настроить backup новой БД, продолжить synthetic-only этап 2. |
+| 2026-10-01 | RP5 — восстановление Tailscale (запись владельца) | выполнен | Tailscale 1.102.5 через постоянный SSH/proxy-профиль; новый узел подтверждён владельцем. | По записи: Tailscale online, ping/SSH доступен, proxy services enabled/active, NeuroLab HTTP 200. | Старое DNS-имя больше не используется; endpoint перенесён в ignored access-запись. | Использовать новый SSH endpoint; backup новой БД. |
+| 2026-10-01 | RP5 — внешний трафик через Throne VPS (запись владельца) | выполнен | Постоянный SSH IP-tunnel, NAT/DNS через VPS. | По записи: RP5 и контейнер имеют VPN egress, остановка tunnel блокирует интернет, restart восстанавливает. | Политика fail-closed при недоступности VPS; LAN-доступ сохранён. Сетевую конфигурацию в текущем восстановлении не изменять. | Наблюдать tunnel и резервный LAN-доступ. |
+| 2026-10-02 | RP5 — проверка NVMe-стека (запись владельца) | выполнен | После reboot работают шесть сервисов, два worker, healthy PostgreSQL/Redis, Tailscale/Throne VPN. | По записи: HTTP 200, очередь 0, два GigaChat-2 probe succeeded. | Synthetic-only; старая research history отсутствует. | Backup новой БД и восстановление research image/runtime. |
+| 2026-10-02 | R1 — независимая инвентаризация нового RP5 | выполнен | SSH-доступ восстановлен прежним пользовательским public key. Новый NVMe WD Blue SN5000 500GB: root ext4, 426GiB свободно; Debian 13 ARM64. `/opt/neuro-lab` на `a6d8a1a`; сохранены четыре незакоммиченные записи владельца в ROADMAP. | `scripts/rp5_healthcheck.py`: 6 running, Postgres/Redis healthy, HTTP 200; migration ledger 16, tasks 4, running 0; sources/documents/cards/diagrams 0; backup directory пуст. Docker 26.1.5, Compose 2.26.1. | `.env` root-only не читается wrappers под bimo; research image, venv и OpenHands runtime отсутствуют. Memory cgroup limit не поддержан, pids поддержан; не выдавать Docker memory flags за доказанную изоляцию. | R2/R3/R4 и реальный backup/restore, затем наполнить новую research БД. |
+
+| 2026-10-02 | R2–R4 — воспроизводимость и корректный отказ, code foundation | выполнен | Три live-wrapper используют опубликованный `research` вместо отсутствующего `claim-proposal`; ключи передаются через ephemeral process env, не аргументы docker. Bootstrap объявляет test/dependency extras. Failover сохраняет настоящий exit code, поддерживает разные модели по линии и typed transient exit 75. Vision распространяет quota/storage/cleanup errors, продолжая batch только при malformed card. Dense PDF pages разбиваются без обрезания текста; excess budget явно отклоняется. | Windows clean venv: 138 tests OK, 3 live/Docker opt-in skipped. Shell failover contract: non-transient exit 23, typed switch, two-lane pause/no calls during pause. | Tests локальные, rollout/live-pass пока не заявляются. Whole-run failover может повторять завершённые окна: per-call resume и общий multiworker budget остаются в R7. OCR/image-only PDF пока явно не покрыт текстовой карточкой. | Развернуть image/venv на RP5, проверить те же suites там; backup/restore перед новым research corpus. |
+
+## 7. План восстановления и сборки полноценного исследовательского стека
+
+### 7.1. Что фактически известно на 2026-10-02
+
+Владелец подтвердил новую установку RP5. GitHub `pypsycoder/neurolab`,
+`main@a6d8a1a` — последняя опубликованная база. Старое локальное зеркало
+отстаёт и содержит чужие изменения: для работы создан отдельный чистый checkout;
+оно не используется как источник актуального кода и не перезаписывается.
+Реквизиты нового RP5 не публикуются: отдельная ignored access-запись.
+
+| Слой | Проверено в опубликованном коде | Что ещё не доказано |
+|---|---|---|
+| Исполнение | Новый RP5: SSH, NVMe 500GB, Debian 13 ARM64, Docker/Compose подтверждены | Memory cgroup limit отсутствует; Connect remote shell недоступен |
+| Control plane | 6 running containers; PostgreSQL/Redis healthy; migration ledger 16; HTTP 200 | Старая БД утрачена: новый research corpus пуст. Backup ещё не настроен |
+| Поиск | Программные allowlisted arXiv/OpenAlex/Crossref adapters, дедупликация и coverage; mandatory search node вместо ненадёжного Hermes tool call | Релевантность/достоверность пока оцениваются metadata heuristics, не независимым воспроизведением |
+| PDF и схемы | Лицензия → exact PDF/hash → текст → GigaChat card; in-memory render → Vision card | Найдено тихое обрезание dense page windows; Vision подавляет ошибки квоты и удаления upload; надо исправить |
+| GigaChat | SDK и wrappers для двух линий | Найден возврат нулевого exit status при непреходящей ошибке failover. Wrappers ссылаются на отсутствующий в опубликованном Compose сервис `claim-proposal` |
+| Код-агент | OpenHands ARM64/gpt2giga ранее исправлял учебную fixture в изолированном контейнере | Binary/image/config были ignored runtime и не восстанавливаются одним clone. Автономного code loop ещё нет |
+| Диспетчер | LangGraph smoke с InMemorySaver, policy/trace contracts | Нет durable checkpoint реального исследовательского графа, scheduler/resume/cancel всей цепочки |
+| Оценка/память | Shadow contracts, lexical frozen suite, solution assets/outcomes | 4-case smoke не semantic quality; sealed holdout — verifier/protocol, не готовый judge и не 20 фактически реализованных скрытых задач |
+
+Уточнение исторического журнала: статус «выполнен» в 2.46/2.53 означает
+foundation/contracts, а не завершённый автономный цикл/semantic judge.
+В 2.54 сохранённая карточка сама по себе не доказывает новый успешный запуск
+secondary lane: дальше требуются отдельный run ID и связанные receipts каждой
+попытки. После нового диска никакие старые счётчики БД не объявляются текущими.
+
+### 7.2. Целевая сборка: готовые компоненты и тонкие проверяемые адаптеры
+
+RP5 запускает PostgreSQL + Redis + control plane + research worker; GigaChat
+вызывает официальный SDK, OpenHands — pinned gpt2giga OpenAI bridge.
+LangGraph управляет графом; MCP предоставляет только явно разрешённые
+инструменты. Не пишем собственную LLM-платформу, browser engine, PDF renderer
+или coding agent. Hermes остаётся факультативным интерфейсом исследователя,
+не обязательной зависимостью поиска. На первом восстановлении сохраняем
+ранее проверенные pin-версии; обновление upstream — отдельный comparable test,
+а не одновременный upgrade всего стека.
+
+Цепочка: задача/ТЗ-0 → поиск → metadata corpus → legal fulltext → document/diagram
+cards → многомерная оценка и gap search → experimental evidence packet →
+GigaChat draft ТЗ → isolated OpenHands → независимые frozen tests →
+continue/repair/harvest_parts/retire → память решений → следующий поиск.
+`promote` означает только проверенный исследовательский asset; clinical/prod
+deployment здесь отсутствует. Модель сама пишет ТЗ, оператор не подменяет его
+ручным prompt. Непроверенные карточки допустимы в experimental-only packet,
+но не становятся `reviewed` или `content_verified` от этого действия.
+
+### 7.3. Очерёдность и критерии приёмки
+
+| Пункт | Результат и критерий | Статус на старте |
+|---|---|---|
+| R1: доступ и сохранность | Проверенный SSH; read-only disk/mount/git/Compose/env-presence inventory; найти старую БД/backups/Claude changes до любой установки. Ничего не форматировать, не удалять volumes, не заменять `.env` | выполнен: старой research БД/backup нет; сохранены новые записи владельца |
+| R2: воспроизводимый bootstrap | Один способ собрать published Compose/research, все CLI существуют в image, test dependencies объявлены. Секреты только на RP5, `.env` 0600, git-ignore проверен; TLS без отключения проверки | в работе |
+| R3: отказоустойчивость моделей | Ненулевой код ошибки; primary→secondary только при transient failure; обе квоты → bounded pause; различные model/scope по линии; никакого вывода provider body/секретов | в работе |
+| R4: полный PDF input и cleanup | Ни один extractable символ не исчезает тихо; лимит окон вызывает явный отказ. Vision не маскирует 429/cleanup failure как success; тесты negative/partial batch | не начат |
+| R5: experimental ТЗ | Отдельный receipt-backed packet для unreviewed public cards; strict structured draft с source/page refs, uncertainty, contracts, tests, assumptions и budgets; отдельная таблица и redacted receipt | не начат |
+| R6: code/test cycle | Восстановить pinned ARM64 OpenHands/gpt2giga из официальных источников с checksum. Нет host/socket/env mount, тесты immutable для агента; test-before/after и allowlisted diff проверяются отдельным evaluator | не начат |
+| R7: durable orchestrator | LangGraph persistent state/checkpoints, tasks/outbox/resume, idempotent шаги, restart/cancel tests. Лимиты wall-time/model calls/tokens; два ключа и pause общие для workers | не начат |
+| R8: автоматический corpus | Search gaps, многомерный scoring theory/practice, evidence provenance, article/diagram dedup, balanced global/subsystem/component/feature coverage. Theory не выбрасывается; reproduction не выдумывается по title | не начат |
+| R9: feedback и evolution | Коррелированные tests/outcomes/asset versions, repair/harvest/retire, rollback; evaluator changes только shadow old/new + frozen invariants. Внешний сильный judge подключить после действующего GigaChat-loop | не начат |
+| R10: эксплуатационная приёмка | Backup + восстановление в отдельной БД; synthetic E2E минимум два разных цикла, reboot/resume/quota/network tests, dashboard результатов PDF/ТЗ/diff/log и metrics; только после этого continuous bounded scheduler | не начат |
+
+Если R1 блокирует runtime rollout, продолжать независимые R2–R5 code/tests.
+Сейчас SSH восстановлен; можно проверять изменения на RP5. Продолжать
+их без запроса подтверждения каждого подэтапа. Нельзя отмечать live-pass,
+deploy или восстановление БД на основании локальных tests. Клинические
+этапы 3–7 остаются отложены до отдельного решения владельца.
+
+## 8. Правило обновления
 
 После существенного результата обновить статус подэтапа и журнал: что сделано,
 где артефакты, какие проверки действительно прошли, известные ограничения,

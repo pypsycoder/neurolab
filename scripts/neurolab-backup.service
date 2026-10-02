@@ -1,0 +1,10 @@
+[Unit]
+Description=NeuroLab synthetic PostgreSQL logical backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/neuro-lab
+ExecStart=/bin/bash /opt/neuro-lab/scripts/backup-postgres.sh
+UMask=0077

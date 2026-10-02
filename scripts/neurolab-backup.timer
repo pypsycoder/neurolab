@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily NeuroLab database backup
+
+[Timer]
+OnCalendar=*-*-* 03:10:00
+RandomizedDelaySec=10m
+Persistent=true
+Unit=neurolab-backup.service
+
+[Install]
+WantedBy=timers.target

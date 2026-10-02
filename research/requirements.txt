@@ -3,3 +3,4 @@ pypdf==6.18.1
 gigachat==0.2.3
 pypdfium2==5.12.1
 Pillow==12.3.0
+langgraph==1.2.11

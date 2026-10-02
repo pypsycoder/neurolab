@@ -8,16 +8,20 @@ from io import BytesIO
 import json, os
 from pathlib import Path
 from typing import Any
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 from pypdf import PdfReader
 from gigachat.models import Chat, Messages
-from neurolab.diagram_cards import build_diagram_prompt, candidate_diagram_pages, parse_diagram_card, render_page_png
+from neurolab.diagram_cards import DiagramCardError, build_diagram_prompt, candidate_diagram_pages, parse_diagram_card, render_page_png
+from neurolab.gigachat_retry import run_redacted_cli
 from neurolab.fulltext_verification import OpenAccessPdfRequest, default_pdf_transport
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.research_storage import load_document_identity, persist_diagram_card
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "runtime" / "it-research" / "latest-diagram-cards.json"
+
+class TemporaryUploadCleanupError(RuntimeError):
+    """Stop the run when a provider upload could not be removed."""
 
 class _VisionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -38,14 +42,14 @@ def _vision(client: Any, prompt: str, image: bytes, page: int) -> str:
         response = client.chat(request)
         content = response.choices[0].message.content
         if not isinstance(content, str):
-            raise RuntimeError("Vision response does not contain text JSON")
+            raise DiagramCardError("Vision response does not contain text JSON")
         candidate = content.strip()
         if candidate.startswith("```json\n") and candidate.endswith("\n```"):
             candidate = candidate[8:-4].strip()
         try:
             value = json.loads(candidate)
         except json.JSONDecodeError as error:
-            raise RuntimeError("Vision response is not JSON") from error
+            raise DiagramCardError("Vision response is not JSON") from None
         # The provider occasionally serializes a one-item string instead of an
         # array. Normalize that narrow representation, then validate the exact
         # bounded schema; no unknown keys or arbitrary shapes are accepted.
@@ -58,8 +62,8 @@ def _vision(client: Any, prompt: str, image: bytes, page: int) -> str:
         if uploaded is not None:
             try:
                 client.delete_file(uploaded.id_)
-            except Exception as error:
-                raise RuntimeError("temporary Vision upload could not be deleted") from error
+            except Exception:
+                raise TemporaryUploadCleanupError("temporary Vision upload could not be deleted") from None
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -83,13 +87,13 @@ def main() -> None:
                 image = render_page_png(response.payload, page_number=page)
                 card = parse_diagram_card(_vision(client, build_diagram_prompt(title=identity.title, page_number=page), image, page), source_key=identity.source_key, document_id=identity.document_id, document_sha256=identity.document_sha256, page_number=page, image_bytes=image)
                 results.append({"card_id": persist_diagram_card(database_url, card), "card": asdict(card), "card_sha256": card.card_sha256})
-            except Exception:
+            except (DiagramCardError, ValidationError):
                 # A malformed page/model response must not expose raw content
                 # or stop the remaining independently bounded candidates.
                 failures.append({"page_number": page, "status": "analysis_failed"})
     if not results:
         raise RuntimeError("no diagram cards could be created")
-    OUT.parent.mkdir(parents=True, exist_ok=True); OUT.write_text(json.dumps({"cards": results}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    OUT.parent.mkdir(parents=True, exist_ok=True); OUT.write_text(json.dumps({"cards": results, "failures": failures}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"diagram_cards: needs_review; pages={len(results)}; failures={len(failures)}")
 
-if __name__ == "__main__": main()
+if __name__ == "__main__": run_redacted_cli(main, component="diagram_cards")

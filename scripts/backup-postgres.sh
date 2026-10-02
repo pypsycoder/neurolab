@@ -7,6 +7,9 @@ BACKUP_DIR="/srv/neuro-lab/backups"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 OUT_FILE="${BACKUP_DIR}/neuro-lab-postgres-${TIMESTAMP}.sql.gz"
+[[ "$RETENTION_DAYS" =~ ^[0-9]{1,3}$ ]] && (( 10#$RETENTION_DAYS >= 1 && 10#$RETENTION_DAYS <= 365 )) || {
+  echo "Invalid backup retention." >&2; exit 2;
+}
 
 read_env_value() {
   python3 - "$PROJECT_DIR/.env" "$1" <<'PY'
@@ -45,10 +48,19 @@ POSTGRES_USER="$(read_env_value POSTGRES_USER)"
 POSTGRES_DB="$(read_env_value POSTGRES_DB)"
 : "${POSTGRES_USER:?POSTGRES_USER must not be empty}"
 : "${POSTGRES_DB:?POSTGRES_DB must not be empty}"
+[[ "$POSTGRES_USER" =~ ^[A-Za-z_][A-Za-z0-9_]{0,62}$ && "$POSTGRES_DB" =~ ^[A-Za-z_][A-Za-z0-9_]{0,62}$ ]] || {
+  echo "Invalid PostgreSQL identifier." >&2; exit 2;
+}
+[[ ! -e "$OUT_FILE" ]] || { echo "Backup filename already exists; refusing overwrite." >&2; exit 1; }
+umask 077
+TEMP_FILE="$(mktemp "$BACKUP_DIR/neuro-lab-postgres-${TIMESTAMP}.XXXXXX.part")"
+trap '[[ -z "${TEMP_FILE:-}" || ! -f "$TEMP_FILE" ]] || rm -- "$TEMP_FILE"' EXIT
 
 cd "$PROJECT_DIR"
 echo "[$(date -Is)] starting backup -> ${OUT_FILE}"
-docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip > "$OUT_FILE"
+docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip > "$TEMP_FILE"
+gzip -t "$TEMP_FILE"
+mv -n -- "$TEMP_FILE" "$OUT_FILE"
 
 DUMP_SIZE="$(du -h "$OUT_FILE" | cut -f1)"
 echo "[$(date -Is)] backup complete: ${OUT_FILE} (${DUMP_SIZE})"

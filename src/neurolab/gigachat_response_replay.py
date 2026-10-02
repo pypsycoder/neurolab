@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from neurolab.response_quality_evaluator import frozen_response_quality_cases
+from neurolab.gigachat_retry import bounded_gigachat_call, GigaChatRetryError
 
 
 class GigaChatResponseReplayError(RuntimeError):
@@ -93,7 +94,9 @@ def request_synthetic_replay(client: Any, *, variant: PromptVariant = "v1") -> d
             + case.prompt
         )
         try:
-            response = client.chat.create(prompt)
+            response = bounded_gigachat_call(lambda: client.chat.create(prompt), max_retries=0)
+        except GigaChatRetryError:
+            raise
         except Exception as error:
             raise GigaChatResponseReplayError("GigaChat synthetic replay request failed") from error
         responses[case.case_id] = _response_text(response)

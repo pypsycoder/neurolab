@@ -10,6 +10,23 @@ printf 'GIGACHAT_PRIMARY_KEY_ENV=TEST_PRIMARY\nGIGACHAT_FREEMIUM_KEY_ENV=TEST_FR
 
 source "$LIBRARY_PATH"
 
+# Regression: status must be captured inside the failed branch, not after if.
+non_transient() { echo 'private provider error body' >&2; return 23; }
+if gigachat_run_with_failover "$TEST_ROOT" "$TEST_ROOT/.env" "$PYTHON_BIN" non_transient > "$TEST_ROOT/non-transient" 2>&1; then
+  echo 'non-transient failure was falsely reported as success' >&2; exit 1
+else
+  [[ "$?" == 23 ]]
+fi
+! grep -q 'private provider error body' "$TEST_ROOT/non-transient"
+
+# An exit code, not a raw provider traceback, is sufficient for failover.
+typed_transient() {
+  [[ "$1" == primary ]] && return 75
+  echo typed-ok
+}
+gigachat_run_with_failover "$TEST_ROOT" "$TEST_ROOT/.env" "$PYTHON_BIN" typed_transient > "$TEST_ROOT/typed"
+[[ "$(<"$TEST_ROOT/typed")" == typed-ok ]]
+
 primary_then_freemium() {
   local lane="$1"
   printf '%s,' "$lane" >> "$TEST_ROOT/attempts"

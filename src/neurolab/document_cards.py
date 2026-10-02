@@ -158,17 +158,43 @@ def _require_lines(values: tuple[str, ...], label: str, maximum: int) -> None:
 
 
 def plan_page_windows(page_texts: tuple[str, ...], *, pages_per_window: int = 2) -> tuple[PageWindow, ...]:
-    """Cover every extractable page exactly once in small model-input windows."""
+    """Cover all extractable text, splitting dense pages without silent truncation."""
     if not 1 <= pages_per_window <= 4:
         raise DocumentCardError("pages per window is outside the limit")
     if not 1 <= len(page_texts) <= 100:
         raise DocumentCardError("document page count is outside the limit")
     windows: list[PageWindow] = []
-    for start in range(0, len(page_texts), pages_per_window):
-        text = "\n".join(page_texts[start : start + pages_per_window]).strip()
-        if not text:
+    pending: list[str] = []
+    start = end = 0
+
+    def flush() -> None:
+        if pending:
+            windows.append(PageWindow(start, end, "\n".join(pending)))
+            pending.clear()
+
+    for page, text in enumerate(page_texts, 1):
+        if not isinstance(text, str):
+            raise DocumentCardError("page text is malformed")
+        if not text.strip():
+            flush()
             continue
-        windows.append(PageWindow(start + 1, min(start + pages_per_window, len(page_texts)), text[:_MAX_WINDOW_CHARS]))
+        if len(text) > _MAX_WINDOW_CHARS:
+            flush()
+            # Repeated page locators denote consecutive parts of that page,
+            # not additional pages. No character is silently discarded.
+            for offset in range(0, len(text), _MAX_WINDOW_CHARS):
+                part = text[offset : offset + _MAX_WINDOW_CHARS]
+                if part.strip():
+                    windows.append(PageWindow(page, page, part))
+            continue
+        if pending and (len(pending) >= pages_per_window or
+                        sum(map(len, pending)) + len(pending) + len(text) > _MAX_WINDOW_CHARS):
+            flush()
+        if not pending:
+            start = page
+        end = page
+        pending.append(text)
+    flush()
     if not windows or len(windows) > _MAX_WINDOWS:
         raise DocumentCardError("document cannot be represented within the window budget")
     return tuple(windows)

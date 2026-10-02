@@ -69,6 +69,19 @@ promote evaluator, code или deployment. Реальные clinical/patient/pro
 
 ### Формат обновления дорожной карты
 
+### Восстановление RP5 и доказательства исполнения
+
+После смены накопителя сначала проверить реальный runtime: disk/mounts,
+Git diff, Compose, migration ledger, backup и count research artifacts.
+Старые записи журнала не доказывают состояние новой БД. Не перезаписывать
+`.env`, чужой Git diff или volumes; сохранять изменения до rollout.
+Приватные SSH/Tailscale/proxy endpoints хранить только в ignored access-note.
+Каждый новый live-pass требует receipt конкретного запуска, а не только
+наличия старого card ID. Работать по разделу 7 ROADMAP без подтверждения
+каждого synthetic подэтапа; clinical/prod границы остаются неизменными.
+
+### Формат записи
+
 Добавить или заполнить запись в разделе «Журнал выполнения» `ROADMAP.md`:
 
 ```markdown

@@ -19,6 +19,20 @@ DOCUMENT_SHA = "b" * 64
 
 
 class DocumentCardTests(unittest.TestCase):
+    def test_dense_pages_are_split_without_dropping_text(self):
+        text = "a" * 12000 + "b" * 12000 + "final-evidence"
+        windows = plan_page_windows((text,))
+        self.assertEqual("".join(window.text for window in windows), text)
+        self.assertEqual([(w.page_start, w.page_end) for w in windows], [(1, 1)] * 3)
+        self.assertTrue(all(len(w.text) <= 12000 for w in windows))
+
+    def test_combined_pages_do_not_truncate_and_budget_fails_explicitly(self):
+        windows = plan_page_windows(("a" * 9000, "b" * 9000, "tail"))
+        self.assertEqual(len(windows), 2)
+        self.assertIn("tail", windows[-1].text)
+        with self.assertRaises(DocumentCardError):
+            plan_page_windows(("a" * (12000 * 51),))
+
     def test_windows_are_bounded_and_cover_extractable_pages(self):
         windows = plan_page_windows(("page one", "page two", "page three", "page four", "page five"))
         self.assertEqual([(item.page_start, item.page_end) for item in windows], [(1, 2), (3, 4), (5, 5)])

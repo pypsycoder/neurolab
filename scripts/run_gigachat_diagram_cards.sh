@@ -9,11 +9,11 @@ run_diagram_cards_lane() {
   local _lane="$1" credential="$2" model="$3"
   shift 3
   cd "$ROOT"
-  docker compose --profile claim-proposal run --rm \
-    -e "GIGACHAT_CREDENTIALS=$credential" -e "GIGACHAT_MODEL=$model" \
+  GIGACHAT_CREDENTIALS="$credential" docker compose --profile research run --rm --no-deps \
+    -e GIGACHAT_CREDENTIALS -e "GIGACHAT_MODEL=$model" \
     -e "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" \
     -v "$CA:/etc/ssl/certs/ca-certificates.crt:ro" \
-    --entrypoint python claim-proposal /app/scripts/run_gigachat_diagram_cards.py "$@"
+    --entrypoint python research /app/scripts/run_gigachat_diagram_cards.py "$@"
 }
 
 gigachat_run_with_failover "$ROOT" "$ENV_FILE" "$PY" run_diagram_cards_lane "$@"
