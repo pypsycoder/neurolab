@@ -136,8 +136,11 @@ services:
     volumes:
       - ./runtime/it-research:/app/runtime/it-research
     read_only: true
-    tmpfs: [/tmp]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=256m"]
     security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 64
+    cpus: 2
     logging:
       driver: json-file
       options:
