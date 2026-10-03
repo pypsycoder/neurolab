@@ -6,10 +6,11 @@ BACKUP_FILE="${1:?pass an exact backup path}"
 MIN_MIGRATIONS="${NEUROLAB_RESTORE_MIN_MIGRATIONS:-16}"
 EXPECT_CODE_RUN="${NEUROLAB_RESTORE_EXPECT_CODE_RUN:-}"
 EXPECT_DIAGRAM_CARD="${NEUROLAB_RESTORE_EXPECT_DIAGRAM_CARD:-}"
+EXPECT_DOCUMENT_CARD="${NEUROLAB_RESTORE_EXPECT_DOCUMENT_CARD:-}"
 EXPECT_CYCLE_RUN="${NEUROLAB_RESTORE_EXPECT_CYCLE_RUN:-}"
 EXPECT_GAP_RUN="${NEUROLAB_RESTORE_EXPECT_GAP_RUN:-}"
 EXPECT_FULLTEXT_RUN="${NEUROLAB_RESTORE_EXPECT_FULLTEXT_RUN:-}"
-for identity in "$EXPECT_CODE_RUN" "$EXPECT_DIAGRAM_CARD" "$EXPECT_CYCLE_RUN" "$EXPECT_GAP_RUN" "$EXPECT_FULLTEXT_RUN"; do
+for identity in "$EXPECT_CODE_RUN" "$EXPECT_DIAGRAM_CARD" "$EXPECT_DOCUMENT_CARD" "$EXPECT_CYCLE_RUN" "$EXPECT_GAP_RUN" "$EXPECT_FULLTEXT_RUN"; do
   [[ -z "$identity" || "$identity" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo 'Invalid expected artifact UUID'; exit 2; }
 done
 [[ "$MIN_MIGRATIONS" =~ ^[0-9]{1,4}$ && "$MIN_MIGRATIONS" -ge 16 && "$MIN_MIGRATIONS" -le 1000 ]] || { echo 'Invalid minimum migration count'; exit 2; }
@@ -52,6 +53,11 @@ if [[ -n "$EXPECT_DIAGRAM_CARD" ]]; then
   PRESENT="$(printf "SELECT CASE WHEN EXISTS (SELECT 1 FROM it_research.diagram_cards WHERE id='%s') THEN 'present' ELSE 'missing' END;\n" "$EXPECT_DIAGRAM_CARD" | restore_psql)"
   [[ "$PRESENT" == present ]] || { echo 'Expected diagram card missing'; exit 1; }
   echo 'backup_restore: exact_diagram_card_present'
+fi
+if [[ -n "$EXPECT_DOCUMENT_CARD" ]]; then
+  PRESENT="$(printf "SELECT CASE WHEN EXISTS (SELECT 1 FROM it_research.document_cards WHERE id='%s') THEN 'present' ELSE 'missing' END;\n" "$EXPECT_DOCUMENT_CARD" | restore_psql)"
+  [[ "$PRESENT" == present ]] || { echo 'Expected document card missing'; exit 1; }
+  echo 'backup_restore: exact_document_card_present'
 fi
 if [[ -n "$EXPECT_CYCLE_RUN" ]]; then
   PRESENT="$(printf "SELECT CASE WHEN EXISTS (SELECT 1 FROM it_research.code_cycle_assessments WHERE run_id='%s' AND status='passed' AND passed=9 AND total=9 AND evaluator_sha256='28139dd8a14dff8b20270391aaea3a724d59c758e556b7514aed14e8cd4c2322') THEN 'present' ELSE 'missing' END;\n" "$EXPECT_CYCLE_RUN" | restore_psql)"

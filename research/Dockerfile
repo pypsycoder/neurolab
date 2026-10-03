@@ -16,6 +16,7 @@ COPY --chown=researcher:researcher scripts/import_openalex_doi_record.py /app/sc
 COPY --chown=researcher:researcher scripts/run_f1000_html_evidence.py /app/scripts/run_f1000_html_evidence.py
 COPY --chown=researcher:researcher scripts/run_f1000_fulltext_cycle.py /app/scripts/run_f1000_fulltext_cycle.py
 COPY --chown=researcher:researcher scripts/run_gigachat_document_card.py /app/scripts/run_gigachat_document_card.py
+COPY --chown=researcher:researcher scripts/verify_document_analysis.py /app/scripts/verify_document_analysis.py
 COPY --chown=researcher:researcher scripts/run_gigachat_diagram_cards.py /app/scripts/run_gigachat_diagram_cards.py
 COPY --chown=researcher:researcher scripts/review_document_card.py /app/scripts/review_document_card.py
 COPY --chown=researcher:researcher scripts/review_diagram_card.py /app/scripts/review_diagram_card.py
