@@ -23,6 +23,7 @@ jobs:
       - name: Verify shell failover and script syntax
         run: |
           bash tests/test_gigachat_failover.sh scripts/lib/gigachat_failover.sh "$(command -v python)"
+          bash tests/test_backup_restore_guards.sh scripts/verify_backup_restore.sh
           while IFS= read -r -d '' script; do
             bash -n "$script"
           done < <(find scripts -name '*.sh' -print0)
