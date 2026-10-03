@@ -22,6 +22,27 @@ def item(title="Artifact provenance and failure recovery", abstract=None):
 
 
 class SelectionTests(unittest.TestCase):
+    def test_mission_change_creates_new_append_only_input_identity(self):
+        old = screen_metadata(item(), "provenance")
+        mission = next(m for m in MISSIONS if m.mission_id == "provenance")
+        with patch("neurolab.research_selection.mission_for", return_value=replace(mission, goal="Updated trusted goal")):
+            new = screen_metadata(item(), "provenance")
+        self.assertNotEqual(old.mission_sha256, new.mission_sha256)
+        self.assertNotEqual(old.input_sha256, new.input_sha256)
+
+    def test_acquisition_schema_explicitly_accepts_current_and_legacy_versions(self):
+        migration = (Path(__file__).resolve().parents[1] / "postgres/migrations/20261003_23_selection_acquisition_policy.sql").read_text()
+        self.assertEqual(migration.count("CHECK (policy_version IN ('corpus-gap-v1','research-selection-v1'))"), 2)
+        self.assertNotIn("DELETE", migration)
+        self.assertNotIn("UPDATE", migration)
+
+    def test_lineage_partial_component_admitted_without_claiming_recovery_implementation(self):
+        value = item("Agent lineage", "We capture provenance to make agent workflows traceable across downstream outcomes. This model does not implement selective re-execution. " * 2)
+        r = screen_metadata(value, "provenance")
+        self.assertEqual(r.decision, "admit")
+        self.assertFalse(r.full_spec_allowed)
+        self.assertEqual(r.independent_reproduction, "not_performed")
+
     def test_frozen_relevance_shadow_not_scientific_verification(self):
         result = compare_selection_shadow()
         self.assertEqual(result["cohort_sha256"], "9f3fd0531d211832f6b04d31e4646e56a3bba3d3f9f5a4d41599171c36fd18b4")

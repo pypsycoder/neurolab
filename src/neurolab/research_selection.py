@@ -42,10 +42,10 @@ MISSIONS = (
     Mission("evaluation", "component", "Evaluate research-agent evidence and citation fidelity",
             "research agent citation verification factuality evidence evaluation", ("agent", "citation", "evaluation"),
             ("agent", "llm", "research", "агент", "модел"), ("citation", "factual", "faithful", "evidence", "цитирован", "достовер", "доказатель")),
-    Mission("provenance", "feature", "Track artifact dependencies and selectively resume failures",
-            "workflow artifact provenance dependencies selective re-execution failure recovery", ("workflow", "provenance", "recovery"),
+    Mission("provenance", "feature", "Track workflow lineage and artifact dependencies; selectively resume failures",
+            "workflow provenance traceability artifact dependencies failure recovery", ("workflow", "provenance", "tracing"),
             ("workflow", "artifact", "provenance", "lineage", "артефакт", "происхожден", "граф"),
-            ("dependenc", "re-execution", "recovery", "failure", "зависим", "восстанов", "сбой", "повторн")),
+            ("dependenc", "re-execution", "recovery", "failure", "traceab", "downstream", "зависим", "восстанов", "сбой", "повторн", "отслеж", "трассиров")),
     Mission("contracts", "component", "Constrain agent tools and independently test code changes",
             "LLM agent tool contracts permissions sandbox testing verification", ("agent", "tool", "verification"),
             ("agent", "llm", "tool", "mcp", "агент", "инструмент"),
@@ -124,9 +124,10 @@ def screen_metadata(item: ResearchItem, mission_id: str, *, source_key: str | No
         decision, reasons = ("explore", ["task_match", "theory_retained"]) if mission.lane == "exploration" else ("admit", ["task_match"])
     title_hash = sha256(item.title.encode()).hexdigest()
     abstract_hash = sha256(item.abstract.encode()).hexdigest() if item.abstract else None
-    return SelectionReceipt(stage="metadata", mission_id=mission_id, mission_sha256=digest(asdict(mission)),
+    mission_hash = digest(asdict(mission))
+    return SelectionReceipt(stage="metadata", mission_id=mission_id, mission_sha256=mission_hash,
         source_key=source_key or canonical_source_key(item), title_sha256=title_hash, abstract_sha256=abstract_hash,
-        input_sha256=digest({"title": title_hash, "abstract": abstract_hash}), decision=decision, reasons=reasons)
+        input_sha256=digest({"title": title_hash, "abstract": abstract_hash, "mission": mission_hash}), decision=decision, reasons=reasons)
 
 
 def metadata_matches(receipt: SelectionReceipt, *, source_key: str, title: str, abstract_sha256: str | None) -> bool:
@@ -134,7 +135,7 @@ def metadata_matches(receipt: SelectionReceipt, *, source_key: str, title: str, 
             and receipt.mission_sha256 == digest(asdict(mission_for(receipt.mission_id)))
             and receipt.title_sha256 == sha256(title.encode()).hexdigest()
             and receipt.abstract_sha256 == abstract_sha256
-            and receipt.input_sha256 == digest({"title": receipt.title_sha256, "abstract": receipt.abstract_sha256})
+            and receipt.input_sha256 == digest({"title": receipt.title_sha256, "abstract": receipt.abstract_sha256, "mission": receipt.mission_sha256})
             and receipt.decision in {"admit", "explore"})
 
 
@@ -150,7 +151,7 @@ def assess_content(card: DocumentCard, metadata: SelectionReceipt, page_texts: t
     reasons, pages, decision = [], [], "insufficient"
     if (metadata.stage != "metadata" or metadata.source_key != card.source_key
             or metadata.mission_sha256 != digest(asdict(mission))
-            or metadata.input_sha256 != digest({"title": metadata.title_sha256, "abstract": metadata.abstract_sha256})
+            or metadata.input_sha256 != digest({"title": metadata.title_sha256, "abstract": metadata.abstract_sha256, "mission": metadata.mission_sha256})
             or metadata.decision not in {"admit", "explore"}):
         reasons = ["metadata_gate_closed"]
     elif any(t in (card.document_summary + " " + card.research_problem).casefold() for t in _OUTSIDE):
