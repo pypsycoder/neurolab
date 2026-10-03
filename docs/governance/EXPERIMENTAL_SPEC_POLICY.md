@@ -39,6 +39,14 @@ response не сохраняется. Тот же frozen evaluator опреде�
 failed source удерживается только по bounded repair policy ниже.
 Ручного написания модели кода нет.
 
+Acceptance дополнительно требует supplementary `provenance-cycles-v1`:
+9 independent cases с циклическим holdout, включая длинные/disconnected
+циклы и acyclic negative control. Исходные 11 frozen cases/50-DAG holdout
+не изменяются. Старые outcome rows не переписываются; для legacy asset
+разрешён отдельный redacted cycle-gate receipt с exact run/code/evaluator
+hashes. Измеренный failed reassessment разрешает repair того же bounded
+source по новой model attempt; source не исправляется оператором вручную.
+
 Для bounded repair уточнение: AST-validated failed source разрешено сохранять
 как `failed-candidate-<run-id>.py`, максимум 16kB, только с `candidate_failed`
 receipt и hash. Это watchlist эксперимент, не accepted/promoted asset.

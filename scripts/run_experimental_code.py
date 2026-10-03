@@ -21,6 +21,7 @@ from neurolab.agent_event_metadata import observe_line
 from neurolab.experimental_spec import DraftSpec, content_hash
 from neurolab.code_diagnostics import static_diagnostics
 from neurolab.code_outcomes import project_code_outcome
+from neurolab.code_cycle_gate import validate_cycle_result
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = 'neurolab/gpt2giga-eval:v0.3.0'
@@ -91,16 +92,29 @@ def main():
     previous_asset = None
     previous_receipt = None
     if args.repair_from:
-        previous_path = artifact_root / f'failed-candidate-{args.repair_from}.py'
         prior_path = artifact_root / f'candidate-receipt-{args.repair_from}.json'
         if prior_path.is_symlink() or prior_path.stat().st_size > 12000:
             raise ValueError('repair receipt boundary invalid')
         previous_receipt = json.loads(prior_path.read_text())
         project_code_outcome(previous_receipt)
-        if (previous_receipt.get('run_id') != str(args.repair_from) or previous_receipt.get('status') != 'candidate_failed'
+        if (previous_receipt.get('run_id') != str(args.repair_from) or previous_receipt.get('status') not in {'candidate_failed','candidate_passed'}
                 or previous_receipt.get('spec_run_id') != source_receipt['run_id']
                 or previous_receipt.get('spec_sha256') != content_hash(draft)):
             raise ValueError('repair specification linkage mismatch')
+        prefix = 'failed-candidate'
+        if previous_receipt['status'] == 'candidate_passed':
+            reassessment_path = artifact_root / f'cycle-gate-receipt-{args.repair_from}.json'
+            if reassessment_path.is_symlink() or reassessment_path.stat().st_size > 12000:
+                raise ValueError('cycle reassessment boundary invalid')
+            reassessment = json.loads(reassessment_path.read_text())
+            passed,_ = validate_cycle_result(reassessment['cycles_evaluation'])
+            cycle_hash = sha256((ROOT/'tests/fixtures/provenance_cycle_evaluator.py').read_bytes()).hexdigest()
+            if (reassessment.get('run_id') != str(args.repair_from) or reassessment.get('code_sha256') != previous_receipt['code_sha256']
+                    or reassessment.get('cycles_evaluator_sha256') != cycle_hash or reassessment.get('status') != 'failed' or passed == 9):
+                raise ValueError('repair requires measured failed cycle reassessment')
+            previous_receipt['cycles_evaluation'] = reassessment['cycles_evaluation']
+            prefix = 'candidate'
+        previous_path = artifact_root / f'{prefix}-{args.repair_from}.py'
         if previous_path.is_symlink() or previous_path.stat().st_size > 16000:
             raise ValueError('repair source boundary invalid')
         previous_asset = previous_path.read_bytes()
@@ -121,6 +135,8 @@ def main():
         raise ValueError('container memory limit not enforced')
     frozen = ROOT/'tests/fixtures/provenance_evaluator.py'
     frozen_hash = sha256(frozen.read_bytes()).hexdigest()
+    cycles = ROOT/'tests/fixtures/provenance_cycle_evaluator.py'
+    cycles_hash = sha256(cycles.read_bytes()).hexdigest()
     run_id = str(uuid4()); suffix = run_id.replace('-','')[:16]
     agent_network = 'nl-code-agent-'+suffix; upstream_network = 'nl-code-upstream-'+suffix
     proxy = 'nl-code-proxy-'+suffix; agent = 'nl-code-agent-'+suffix
@@ -143,17 +159,20 @@ def main():
     try:
         security = ['--read-only','--log-driver','none','--cap-drop','ALL','--security-opt','no-new-privileges',
                     '--pids-limit','64','--cpus','2']
-        def evaluate():
+        def evaluate(fixture=frozen):
             code, output = command(['docker','run','--rm','--name',evaluator,'--network','none','--user','1000:1000',
                 '--memory','256m','--memory-swap','256m',*security,
                 '--tmpfs','/tmp:rw,noexec,nosuid,size=16m',
-                '-v',f'{experiment}:/candidate:ro','-v',f'{frozen}:/frozen.py:ro',
+                '-v',f'{experiment}:/candidate:ro','-v',f'{fixture}:/frozen.py:ro',
                 '--entrypoint','/usr/local/bin/python',IMAGE,'-B','/frozen.py','/candidate/provenance.py'],timeout=60)
             if code not in (0,1):
                 raise RuntimeError('independent evaluator did not finish')
             result = json.loads(output)
-            if result.get('evaluator_version') != 'provenance-frozen-v1' or result.get('total') != 11:
-                raise ValueError('independent evaluator receipt invalid')
+            if fixture == frozen:
+                if result.get('evaluator_version') != 'provenance-frozen-v1' or result.get('total') != 11:
+                    raise ValueError('independent evaluator receipt invalid')
+            else:
+                validate_cycle_result(result)
             return result
         baseline = evaluate()
         if baseline['passed'] != 0:
@@ -214,6 +233,8 @@ def main():
             feedback = {'previous_run_id':str(args.repair_from),
                 'failed_cases':[item['case'] for item in previous_receipt['evaluation']['cases'] if not item['passed']],
                 'static_diagnostics':previous_receipt.get('static_diagnostics',[])}
+            if previous_receipt.get('cycles_evaluation'):
+                feedback['failed_cycle_cases'] = validate_cycle_result(previous_receipt['cycles_evaluation'])[1]
             task += '\nThe existing file is your previous failed implementation. Repair it, do not change tests.\n<INDEPENDENT_FEEDBACK>\n'+json.dumps(feedback,sort_keys=True)+'\n</INDEPENDENT_FEEDBACK>'
         code,agent_output = command(['docker','run','--rm','--name',agent,'--network',agent_network,'--user','1000:1000',
             *security,'--memory','2g','--memory-swap','2g',
@@ -235,13 +256,15 @@ def main():
         asset, asset_hash = validate_code_asset(experiment)
         receipt['static_diagnostics'] = static_diagnostics(target)
         result = evaluate(); receipt['evaluation'] = result
+        receipt['cycles_evaluation'] = evaluate(cycles)
+        receipt['cycles_evaluator_sha256'] = cycles_hash
         receipt['code_executed'] = True
         receipt['independent_score'] = result['passed']/result['total']
         receipt['code_sha256'] = asset_hash
         receipt['code_changed'] = asset != initial_asset
-        if sha256(frozen.read_bytes()).hexdigest() != frozen_hash:
+        if sha256(frozen.read_bytes()).hexdigest() != frozen_hash or sha256(cycles.read_bytes()).hexdigest() != cycles_hash:
             raise ValueError('immutable evaluator changed')
-        if code == 0 and receipt['code_changed'] and result['passed'] == result['total'] and not receipt['static_diagnostics']:
+        if code == 0 and receipt['code_changed'] and result['passed'] == result['total'] and receipt['cycles_evaluation']['passed'] == 9 and not receipt['static_diagnostics']:
             destination = artifact_root/f'candidate-{run_id}.py'
             publish_artifact(destination,asset)
             receipt.update(status='candidate_passed',decision='harvest_parts',next_step='independent architecture integration experiment')

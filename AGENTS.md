@@ -96,6 +96,14 @@ rule/line/column diagnostics; не чинить модельный candidate в�
 ослаблять тесты ради pass. Final outcomes записывать append-only в БД;
 passing asset остаётся candidate, не auto-promoted/production.
 
+Исходный `provenance-frozen-v1` (11 cases/50-DAG holdout) не менять.
+Supplementary `provenance-cycles-v1` (9 cases/24 cyclic holdouts) запускается
+отдельно и не монтируется агенту. Новый acceptance требует старые 11/11,
+дополнительные 9/9, Ruff и runtime gate. Legacy 11/11 receipts остаются
+неизменяемыми историческими результатами, не доказательством нового gate.
+Повторная оценка пишет отдельный hash-linked receipt; failed reassessment
+может инициировать модельный repair, но не ручную правку candidate.
+
 R7 начать с official PostgresSaver и receipt-only durable reconciliation:
 checkpoint содержит UUID/hash/metrics/decision, не prompts/cards/source/keys.
 Serializer strict, pickle запрещён. Resume завершённых шагов не вызывает

@@ -5,6 +5,7 @@ import math
 import re
 from uuid import UUID
 from neurolab.code_diagnostics import RULES
+from neurolab.code_cycle_gate import validate_cycle_result
 
 CASES = {'empty','chain','upstream_excluded','branch_isolation','diamond_duplicates','isolated','leaf','cycle','self_loop','disconnected_cycle','synthetic_dag_holdout_50'}
 
@@ -42,7 +43,9 @@ def project_code_outcome(receipt):
         if type(receipt.get('agent_exit_code')) is not int or not -255 <= receipt['agent_exit_code'] <= 255 or type(receipt.get('code_changed')) is not bool:
             raise ValueError('agent execution receipt malformed')
         runtime_gate = receipt['agent_exit_code'] == 0 and receipt['code_changed']
-    accepted=passed==11 and not diagnostics and runtime_gate
+    cycles = receipt.get('cycles_evaluation')
+    cycles_passed = validate_cycle_result(cycles)[0] if cycles is not None else None
+    accepted=passed==11 and not diagnostics and runtime_gate and cycles_passed in {None,9}
     expected_status='candidate_passed' if accepted else 'candidate_failed'
     expected_decision='harvest_parts' if accepted else 'repair'
     if receipt['status']!=expected_status or receipt['decision']!=expected_decision or receipt['independent_score']!=passed/11:
@@ -53,6 +56,12 @@ def project_code_outcome(receipt):
         'production_deployed':False,'self_score':receipt['self_score'],'static_diagnostics':diagnostics}
     if receipt['agent']=='OpenHands-CLI-1.16.0':
         result.update(agent_exit_code=receipt['agent_exit_code'],code_changed=receipt['code_changed'],runtime_gate_passed=runtime_gate)
+    if cycles is not None:
+        result.update(cycles_evaluation=cycles)
+        digest = receipt.get('cycles_evaluator_sha256')
+        if not isinstance(digest,str) or not re.fullmatch('[0-9a-f]{64}',digest):
+            raise ValueError('cycle evaluator digest invalid')
+        result['cycles_evaluator_sha256'] = digest
     score=result['self_score']
     if score is not None and (type(score) not in {float,int} or not math.isfinite(score) or not 0<=score<=1):
         raise ValueError('self score invalid')

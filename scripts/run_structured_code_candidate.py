@@ -13,6 +13,7 @@ from gigachat.models import Chat, Messages
 from neurolab.experimental_spec import DraftSpec, canonical_json, content_hash
 from neurolab.experimental_code import build_code_task, validate_code_asset
 from neurolab.code_diagnostics import static_diagnostics
+from neurolab.code_cycle_gate import validate_cycle_result
 from neurolab.code_repair import CodeRepair, apply_line_repair, parse_repair_response, repair_output_diagnostics
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.gigachat_retry import bounded_gigachat_call, run_redacted_cli
@@ -48,6 +49,8 @@ def main():
         feedback={'previous_run_id':str(args.repair_from),'self_score':prior['self_score'],
             'independent_passed':prior['evaluation']['passed'],'independent_total':prior['evaluation']['total'],
             'failed_cases':[item['case'] for item in prior['evaluation']['cases'] if not item['passed']]}
+        if prior.get('cycles_evaluation'):
+            feedback['failed_cycle_cases']=validate_cycle_result(prior['cycles_evaluation'])[1]
         previous=root/f'failed-candidate-{args.repair_from}.py'
         if previous.is_file():
             if previous.is_symlink() or previous.stat().st_size>16000 or sha256(previous.read_bytes()).hexdigest()!=prior['code_sha256']:

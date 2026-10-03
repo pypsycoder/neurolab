@@ -10,6 +10,7 @@ from uuid import UUID
 
 from neurolab.experimental_code import BASELINE, validate_code_asset
 from neurolab.code_diagnostics import static_diagnostics
+from neurolab.code_cycle_gate import validate_cycle_result
 from run_experimental_code import command, require, IMAGE
 
 
@@ -31,23 +32,28 @@ def main():
         raise ValueError('actual evaluation memory limit not enforced')
     frozen=root/'tests/fixtures/provenance_evaluator.py'
     receipt['evaluator_sha256']=sha256(frozen.read_bytes()).hexdigest()
+    cycles=root/'tests/fixtures/provenance_cycle_evaluator.py'
+    receipt['cycles_evaluator_sha256']=sha256(cycles.read_bytes()).hexdigest()
     container='nl-sdk-eval-'+run_id.replace('-','')[:16]
     work=Path(tempfile.mkdtemp(prefix='candidate-eval-',dir=artifacts)); work.chmod(0o755)
     target=work/'provenance.py'
     try:
-        def evaluate(code):
+        def evaluate(code, fixture=frozen):
             target.write_bytes(code); target.chmod(0o644)
             status,output=command(['docker','run','--rm','--name',container,'--network','none','--user','1000:1000',
                 '--read-only','--log-driver','none','--cap-drop','ALL','--security-opt','no-new-privileges',
                 '--pids-limit','32','--cpus','1','--memory','256m','--memory-swap','256m',
                 '--tmpfs','/tmp:rw,noexec,nosuid,size=16m','-v',f'{target}:/candidate.py:ro',
-                '-v',f'{frozen}:/frozen.py:ro','--entrypoint','/usr/local/bin/python',
+                '-v',f'{fixture}:/frozen.py:ro','--entrypoint','/usr/local/bin/python',
                 IMAGE,'-B','/frozen.py','/candidate.py'],timeout=60)
             if status not in {0,1}:
                 raise ValueError('independent evaluation did not finish')
             result=json.loads(output)
-            if result['total']!=11 or result['evaluator_version']!='provenance-frozen-v1':
-                raise ValueError('independent evaluation receipt invalid')
+            if fixture==frozen:
+                if result['total']!=11 or result['evaluator_version']!='provenance-frozen-v1':
+                    raise ValueError('independent evaluation receipt invalid')
+            else:
+                validate_cycle_result(result)
             return result
         receipt['baseline']=evaluate(BASELINE.encode())
         if receipt['baseline']['passed']!=0:
@@ -56,11 +62,12 @@ def main():
         code,digest=validate_code_asset(work)
         receipt['static_diagnostics']=static_diagnostics(source)
         receipt['evaluation']=evaluate(code)
+        receipt['cycles_evaluation']=evaluate(code,cycles)
         receipt['code_executed']=True
         receipt['independent_score']=receipt['evaluation']['passed']/11
-        if sha256(frozen.read_bytes()).hexdigest()!=receipt['evaluator_sha256']:
+        if sha256(frozen.read_bytes()).hexdigest()!=receipt['evaluator_sha256'] or sha256(cycles.read_bytes()).hexdigest()!=receipt['cycles_evaluator_sha256']:
             raise ValueError('frozen evaluator changed')
-        passed=receipt['evaluation']['passed']==11 and not receipt['static_diagnostics']
+        passed=receipt['evaluation']['passed']==11 and receipt['cycles_evaluation']['passed']==9 and not receipt['static_diagnostics']
         receipt.update(status='candidate_passed' if passed else 'candidate_failed',decision='harvest_parts' if passed else 'repair',production_deployed=False,
             next_step='independent integration experiment' if passed else 'bounded repair from failed case IDs')
         if passed:
