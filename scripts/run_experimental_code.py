@@ -64,6 +64,13 @@ def require(args: list[str], *, timeout: int = 30) -> bytes:
     return output
 
 
+def publish_artifact(path: Path, payload: bytes) -> None:
+    """Only validated source/redacted receipts, readable by the non-root research worker."""
+    path.write_bytes(payload)
+    path.chmod(0o600)
+    os.chown(path,1000,1000)
+
+
 def main():
     if os.environ.get('RUN_EXPERIMENTAL_CODE') != '1' or os.name != 'posix' or os.geteuid() != 0:
         raise ValueError('root Docker coordinator requires RUN_EXPERIMENTAL_CODE=1')
@@ -236,11 +243,11 @@ def main():
             raise ValueError('immutable evaluator changed')
         if code == 0 and receipt['code_changed'] and result['passed'] == result['total'] and not receipt['static_diagnostics']:
             destination = artifact_root/f'candidate-{run_id}.py'
-            destination.write_bytes(asset); destination.chmod(0o600)
+            publish_artifact(destination,asset)
             receipt.update(status='candidate_passed',decision='harvest_parts',next_step='independent architecture integration experiment')
         else:
             destination = artifact_root/f'failed-candidate-{run_id}.py'
-            destination.write_bytes(asset); destination.chmod(0o600)
+            publish_artifact(destination,asset)
             receipt.update(status='candidate_failed',decision='repair',next_step='bounded repair from failed frozen case IDs')
     finally:
         for name in containers:
@@ -252,10 +259,11 @@ def main():
             raise ValueError('unsafe sandbox cleanup target')
         shutil.rmtree(work)
         receipt['wall_seconds'] = round(time.monotonic()-started,2)
-        (artifact_root/f'code-receipt-{run_id}.json').write_text(json.dumps(receipt,sort_keys=True)+'\n')
+        payload = (json.dumps(receipt,sort_keys=True)+'\n').encode()
+        publish_artifact(artifact_root/f'code-receipt-{run_id}.json',payload)
         if receipt['code_executed']:
             path = artifact_root/f'candidate-receipt-{run_id}.json'
-            path.write_text(json.dumps(receipt,sort_keys=True)+'\n'); path.chmod(0o600)
+            publish_artifact(path,payload)
         print(json.dumps(receipt,sort_keys=True))
     if receipt['status'] != 'candidate_passed':
         raise SystemExit(75 if receipt.get('provider_temporarily_unavailable') else 1)
