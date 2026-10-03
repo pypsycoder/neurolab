@@ -24,7 +24,7 @@ run_document_card_lane() {
   shift 3
   cd "$PROJECT_ROOT"
   GIGACHAT_CREDENTIALS="$credential" docker compose --profile research run --rm --no-deps \
-    -e GIGACHAT_CREDENTIALS \
+    -e GIGACHAT_CREDENTIALS -e GIGACHAT_SCOPE \
     -e "GIGACHAT_MODEL=$model" \
     -e "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" \
     -v "$SYSTEM_CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \

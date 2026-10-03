@@ -8,7 +8,7 @@ run_candidate_lane() {
   shift 3
   cd "$ROOT"
   GIGACHAT_CREDENTIALS="$credential" docker compose --profile research run --rm --no-deps \
-    -e GIGACHAT_CREDENTIALS -e "GIGACHAT_MODEL=$model" -e GIGACHAT_TIMEOUT=180 \
+    -e GIGACHAT_CREDENTIALS -e GIGACHAT_SCOPE -e "GIGACHAT_MODEL=$model" -e GIGACHAT_TIMEOUT=180 \
     -e SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     -v "$ROOT/runtime/ca/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro" \
     --entrypoint python research /app/scripts/run_structured_code_candidate.py "$@"

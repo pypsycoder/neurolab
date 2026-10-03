@@ -10,6 +10,19 @@ printf 'GIGACHAT_PRIMARY_KEY_ENV=TEST_PRIMARY\nGIGACHAT_FREEMIUM_KEY_ENV=TEST_FR
 
 source "$LIBRARY_PATH"
 
+# Model/scope are independently selected per account, not borrowed from primary.
+printf 'GIGACHAT_PRIMARY_SCOPE=GIGACHAT_API_B2B\nGIGACHAT_FREEMIUM_SCOPE=GIGACHAT_API_PERS\nGIGACHAT_PRIMARY_MODEL=GigaChat-2-Max\nGIGACHAT_FREEMIUM_MODEL=GigaChat-2-Pro\n' >> "$TEST_ROOT/.env"
+per_lane_settings() {
+  if [[ "$1" == primary ]]; then
+    [[ "$GIGACHAT_SCOPE" == GIGACHAT_API_B2B && "$3" == GigaChat-2-Max ]] || return 24
+    return 75
+  fi
+  [[ "$GIGACHAT_SCOPE" == GIGACHAT_API_PERS && "$3" == GigaChat-2-Pro ]] || return 25
+  echo lane-settings-ok
+}
+gigachat_run_with_failover "$TEST_ROOT" "$TEST_ROOT/.env" "$PYTHON_BIN" per_lane_settings > "$TEST_ROOT/per-lane"
+[[ "$(<"$TEST_ROOT/per-lane")" == lane-settings-ok ]]
+
 # Regression: status must be captured inside the failed branch, not after if.
 non_transient() { echo 'private provider error body' >&2; return 23; }
 if gigachat_run_with_failover "$TEST_ROOT" "$TEST_ROOT/.env" "$PYTHON_BIN" non_transient > "$TEST_ROOT/non-transient" 2>&1; then

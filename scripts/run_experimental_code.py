@@ -140,7 +140,9 @@ def main():
         if not isinstance(key_name,str) or not key_name.isidentifier() or not values.get(key_name):
             raise ValueError('provider credential lane unavailable')
         proxy_key = secrets.token_hex(32)
-        scope = values.get('GIGACHAT_SCOPE') or 'GIGACHAT_API_PERS'
+        scope = values.get(f'GIGACHAT_{lane.upper()}_SCOPE') or values.get('GIGACHAT_SCOPE') or 'GIGACHAT_API_PERS'
+        if scope not in {'GIGACHAT_API_PERS','GIGACHAT_API_B2B','GIGACHAT_API_CORP'}:
+            raise ValueError('provider scope malformed')
         model = values.get(f'GIGACHAT_{lane.upper()}_MODEL') or values.get('GIGACHAT_MODEL') or 'GigaChat-2-Pro'
         receipt['model_label'] = model
         receipt['provider_lane'] = lane

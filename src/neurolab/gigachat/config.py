@@ -43,10 +43,13 @@ class GigaChatSettings:
         model = os.environ.get("GIGACHAT_MODEL", DEFAULT_MODEL).strip()
         if not _MODEL.fullmatch(model):
             raise ValueError("GigaChat model identifier is malformed")
+        scope=os.environ.get("GIGACHAT_SCOPE",DEFAULT_SCOPE).strip() or DEFAULT_SCOPE
+        if scope not in {"GIGACHAT_API_PERS","GIGACHAT_API_B2B","GIGACHAT_API_CORP"}:
+            raise ValueError("GigaChat scope is malformed")
 
         return cls(
             credentials=credentials,
-            scope=os.environ.get("GIGACHAT_SCOPE", DEFAULT_SCOPE).strip() or DEFAULT_SCOPE,
+            scope=scope,
             model=model,
             base_url=base_url,
             timeout=float(os.environ.get("GIGACHAT_TIMEOUT", "60")),

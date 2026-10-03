@@ -12,7 +12,7 @@ run_spec_lane() {
   local lane="$1" credential="$2" model="$3"
   cd "$ROOT"
   GIGACHAT_CREDENTIALS="$credential" docker compose --profile research run --rm --no-deps \
-    -e GIGACHAT_CREDENTIALS -e "GIGACHAT_MODEL=$model" -e GIGACHAT_TIMEOUT=120 \
+    -e GIGACHAT_CREDENTIALS -e GIGACHAT_SCOPE -e "GIGACHAT_MODEL=$model" -e GIGACHAT_TIMEOUT=120 \
     -e "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" \
     -v "$CA:/etc/ssl/certs/ca-certificates.crt:ro" \
     --entrypoint python research /app/scripts/run_experimental_spec.py

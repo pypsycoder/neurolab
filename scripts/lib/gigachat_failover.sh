@@ -40,6 +40,20 @@ print(value.strip())
 '
 }
 
+_gigachat_load_scope() {
+  local env_file="$1" python_bin="$2" lane="$3"
+  NEUROLAB_ENV_FILE="$env_file" NEUROLAB_GIGACHAT_LANE="$lane" "$python_bin" -c '
+import os
+from dotenv import dotenv_values
+values=dotenv_values(os.environ["NEUROLAB_ENV_FILE"],interpolate=False)
+name="GIGACHAT_"+os.environ["NEUROLAB_GIGACHAT_LANE"].upper()+"_SCOPE"
+value=values.get(name) or values.get("GIGACHAT_SCOPE") or "GIGACHAT_API_PERS"
+if value not in {"GIGACHAT_API_PERS","GIGACHAT_API_B2B","GIGACHAT_API_CORP"}:
+    raise SystemExit("Configured GigaChat scope is invalid.")
+print(value)
+'
+}
+
 _gigachat_load_credential() {
   local lane="$1" env_file="$2" python_bin="$3" config_name
   case "$lane" in
@@ -71,18 +85,19 @@ gigachat_run_with_failover() {
   # runner arguments: lane credential model followed by the caller's arguments.
   local root="$1" env_file="$2" python_bin="$3" runner="$4"
   shift 4
-  local model lane credential captured status
+  local model scope lane credential captured status
   if _gigachat_is_paused "$root"; then
     echo "GigaChat research lanes are paused after rate limiting; no provider call was made." >&2
     return 75
   fi
   for lane in primary freemium; do
     model="$(_gigachat_load_model "$env_file" "$python_bin" "$lane")" || return $?
+    scope="$(_gigachat_load_scope "$env_file" "$python_bin" "$lane")" || return $?
     credential="$(_gigachat_load_credential "$lane" "$env_file" "$python_bin")" || {
       echo "Configured GigaChat $lane lane is unavailable." >&2
       return 1
     }
-    if captured="$("$runner" "$lane" "$credential" "$model" "$@" 2>&1)"; then
+    if captured="$(GIGACHAT_SCOPE="$scope" "$runner" "$lane" "$credential" "$model" "$@" 2>&1)"; then
       printf '%s\n' "$captured"
       unset credential
       return 0

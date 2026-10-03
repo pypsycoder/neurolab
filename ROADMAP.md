@@ -2,7 +2,7 @@
 
 **Версия:** 0.2
 **Создана:** 2026-09-13  
-**Актуализация:** 2026-10-02, восстановление после нового накопителя RP5
+**Актуализация:** 2026-10-03, восстановление RP5 и первый code/repair pass
 **Назначение:** от проверяемых интеграций GigaChat, gpt2giga, Hermes,
 OpenHands, LangGraph и MCP — к безопасной клинической системе поддержки
 пациентов на гемодиализе.
@@ -363,6 +363,10 @@ diff». Артефакт должен быть повторяемым.
 
 ## 7. План восстановления и сборки полноценного исследовательского стека
 
+| 2026-10-03 | R6 — первый успешный model repair; R7 foundation | в работе | GigaChat-2-Pro сам исправил source: run `1c0c4597-6998-4cdd-8572-89e2490cf8d0`, hash `ec5890cb669d64944dd9eea27f7aedd4a07e92644b73d457e210c2e9ef19554b`. Независимый результат 11/11, Ruff clean; DB outcome и candidate solution asset persisted. Добавляется готовый LangGraph PostgresSaver 3.1.2 для receipt-only resume, без paid nodes. | Repair 996 prompt + 52 completion = 1048 tokens; self-score 0.9, independent 1.0. Frozen evaluator hash не изменился, включая 50-DAG holdout. | Полная цепочка первого tiny component пройдена с SDK fallback, general OpenHands no-op ещё не исправлен. Durable foundation не объявляется полным research graph/scheduler. | Проверить checkpoint между двумя процессами, terminal idempotency/cancel, backup/restore и feature-branch push. |
+
+| 2026-10-03 | R3 — отдельный scope для каждого ключа | в работе | Research wrappers и gateway теперь выбирают per-lane model/scope; SDK отклоняет unknown scope. Секреты по-прежнему только на RP5; текущие два personal account не переконфигурировались. | Offline shell test проверяет primary B2B/Max → secondary PERS/Pro без реальных ключей. Допустимые scopes сверены с официальной документацией GigaChat. | Ранее secondary могла наследовать неподходящий primary scope. Общий межworker budget/pause/checkpoint остаётся R7, не считается готовым этим фиксом. | Прогнать Windows/RP5 regression + shell tests, затем проверить backup/receipt snapshot и опубликовать feature branch. |
+
 | 2026-10-03 | R6 — transport diagnostics без raw content | в работе | RP5 остаётся здоровым: 6 running services, 18 migrations, HTTP 200. Plain repair отклонён local schema до исполнения. Добавлен bounded framing/schema diagnostic без текста/values, complete JSON fence допускается целиком, но не partial JSON/length/preface. Repair получает exact spec hash и numbered previous source вместо повторного полного ТЗ. | 165 tests OK / 3 skipped в предыдущем checkpoint; новые parser tests выполняются. Старые failed receipts не объявляются новым pass. | Повторные model calls допустимы только после конкретного изменения диагностического/transport подхода; continuous mode по-прежнему запрещён. | Проверить parser regression, выполнить один diagnostic repair и сохранить фактический исход. |
 
 | 2026-10-02 | R6 — проверка отказа structured repair | в работе | Native CodeRepair response помечен provider `length` после 54 completion tokens при max_tokens 1024; SDK правильно отклонил его. Причина server/schema decoder не доказана. Для коротких line edits пробуется обычный SDK chat + строгая локальная Pydantic validation. | 164 Windows/RP5 tests OK / 3 skipped до этой дополнительной проверки. `length` не игнорируется, partial JSON не принимается, plain repair требует finish_reason stop и все те же code gates. | Повышение max_tokens не объясняет ранний length. Новая попытка меняет transport format, а не критерии приёмки/алгоритм. | Один bounded plain-JSON repair; при отказе остановить повторные model calls и зафиксировать checkpoint. |
@@ -399,7 +403,7 @@ Foundation tests прошли; live draft `95d8eda8-4fe3-4689-9bb1-d2913d95941a`
 сохранён в БД по новой text card. Следующий шаг — independent code gate,
 не выдавать этот tiny DAG за полноценное ТЗ всей архитектуры/clinical системы.
 
-### 7.1. Что фактически известно на 2026-10-02
+### 7.1. Текущее фактическое состояние на 2026-10-03
 
 Владелец подтвердил новую установку RP5. GitHub `pypsycoder/neurolab`,
 `main@a6d8a1a` — последняя опубликованная база. Старое локальное зеркало
@@ -407,16 +411,16 @@ Foundation tests прошли; live draft `95d8eda8-4fe3-4689-9bb1-d2913d95941a`
 оно не используется как источник актуального кода и не перезаписывается.
 Реквизиты нового RP5 не публикуются: отдельная ignored access-запись.
 
-| Слой | Проверено в опубликованном коде | Что ещё не доказано |
+| Слой | Проверено в runtime / feature branch | Что ещё не доказано |
 |---|---|---|
-| Исполнение | Новый RP5: SSH, NVMe 500GB, Debian 13 ARM64, Docker/Compose подтверждены | Memory cgroup limit отсутствует; Connect remote shell недоступен |
-| Control plane | 6 running containers; PostgreSQL/Redis healthy; migration ledger 16; HTTP 200 | Старая БД утрачена: новый research corpus пуст. Backup ещё не настроен |
+| Исполнение | Новый RP5: SSH, NVMe 500GB, Debian 13 ARM64, Docker/Compose; после reboot memory.max проверен | Connect remote shell недоступен, но SSH работает; off-device backup ещё не выбран |
+| Control plane | 6 running containers; PostgreSQL/Redis healthy; migration ledger 18; HTTP 200; daily backup и isolated restore | Старая БД утрачена; новая содержит 10 sources, 1 document/text card, 0 diagram cards |
 | Поиск | Программные allowlisted arXiv/OpenAlex/Crossref adapters, дедупликация и coverage; mandatory search node вместо ненадёжного Hermes tool call | Релевантность/достоверность пока оцениваются metadata heuristics, не независимым воспроизведением |
-| PDF и схемы | Лицензия → exact PDF/hash → текст → GigaChat card; in-memory render → Vision card | Найдено тихое обрезание dense page windows; Vision подавляет ошибки квоты и удаления upload; надо исправить |
-| GigaChat | SDK и wrappers для двух линий | Найден возврат нулевого exit status при непреходящей ошибке failover. Wrappers ссылаются на отсутствующий в опубликованном Compose сервис `claim-proposal` |
-| Код-агент | OpenHands ARM64/gpt2giga ранее исправлял учебную fixture в изолированном контейнере | Binary/image/config были ignored runtime и не восстанавливаются одним clone. Автономного code loop ещё нет |
-| Диспетчер | LangGraph smoke с InMemorySaver, policy/trace contracts | Нет durable checkpoint реального исследовательского графа, scheduler/resume/cancel всей цепочки |
-| Оценка/память | Shadow contracts, lexical frozen suite, solution assets/outcomes | 4-case smoke не semantic quality; sealed holdout — verifier/protocol, не готовый judge и не 20 фактически реализованных скрытых задач |
+| PDF и схемы | Новый legal 7-page PDF → 4 text windows → GigaChat card; dense text и quota/cleanup negative cases исправлены | Новый live Vision pass пока не выполнен; OCR отсутствует |
+| GigaChat | Two-lane failover/pause и true failure status, CLI imports и Compose routes исправлены; новое ТЗ и code repair реально выполнены | General tool bridge нестабилен; общий межworker model/token budget ещё не реализован |
+| Код-агент | Pinned ARM64 OpenHands/gpt2giga восстановлены; bounded SDK code → repair → frozen gate 11/11, без ручной правки candidate | General OpenHands пока дал no-op 0/11; tiny DAG не доказывает полноценного repository coding |
+| Диспетчер | LangGraph contracts; добавляется official PostgresSaver receipt-only resume/cancel | Paid research graph, shared budgets, attempt recovery и continuous scheduler ещё не приняты |
+| Оценка/память | Append-only code outcomes; один passing candidate asset, два измеренных failures; frozen 11-case gate с 50-DAG holdout | Semantic article/response judge и full evolution loop не готовы; sealed holdout остаётся verifier/protocol |
 
 Уточнение исторического журнала: статус «выполнен» в 2.46/2.53 означает
 foundation/contracts, а не завершённый автономный цикл/semantic judge.
@@ -450,13 +454,13 @@ deployment здесь отсутствует. Модель сама пишет �
 |---|---|---|
 | R1: доступ и сохранность | Проверенный SSH; read-only disk/mount/git/Compose/env-presence inventory; найти старую БД/backups/Claude changes до любой установки. Ничего не форматировать, не удалять volumes, не заменять `.env` | выполнен: старой research БД/backup нет; сохранены новые записи владельца |
 | R2: воспроизводимый bootstrap | Один способ собрать published Compose/research, все CLI существуют в image, test dependencies объявлены. Секреты только на RP5, `.env` 0600, git-ignore проверен; TLS без отключения проверки | выполнен: ARM64 image/venv, pinned OpenHands/gateway, backup/restore, reboot health; transitive lockfile остаётся улучшением |
-| R3: отказоустойчивость моделей | Ненулевой код ошибки; primary→secondary только при transient failure; обе квоты → bounded pause; различные model/scope по линии; никакого вывода provider body/секретов | в работе: two-lane/typed timeout/15min pause tested; per-lane scope и общий multiworker accounting ещё нужны |
+| R3: отказоустойчивость моделей | Ненулевой код ошибки; primary→secondary только при transient failure; обе квоты → bounded pause; различные model/scope по линии; никакого вывода provider body/секретов | в работе: two-lane/typed timeout/15min pause/per-lane model/scope; общий multiworker accounting ещё нужен |
 | R4: полный PDF input и cleanup | Ни один extractable символ не исчезает тихо; лимит окон вызывает явный отказ. Vision не маскирует 429/cleanup failure как success; тесты negative/partial batch | в работе: live text 7 pages/4 windows + card; Vision live ещё не прошёл, OCR не реализован |
 | R5: experimental ТЗ | Отдельный receipt-backed packet для unreviewed public cards; strict structured draft с source/page refs, uncertainty, contracts, tests, assumptions и budgets; отдельная таблица и redacted receipt | выполнен для first tiny DAG: live GigaChat ТЗ + DB receipt; semantic/locale/multilevel coverage ещё не приняты |
-| R6: code/test cycle | Восстановить pinned ARM64 OpenHands/gpt2giga из официальных источников с checksum. Нет host/socket/env mount, тесты immutable для агента; test-before/after и allowlisted diff проверяются отдельным evaluator | в работе: assets/isolation/frozen gate готовы; OpenHands no-op 0/11 правильно отвергнут, SDK proposal проверяется |
-| R7: durable orchestrator | LangGraph persistent state/checkpoints, tasks/outbox/resume, idempotent шаги, restart/cancel tests. Лимиты wall-time/model calls/tokens; два ключа и pause общие для workers | не начат |
+| R6: code/test cycle | Восстановить pinned ARM64 OpenHands/gpt2giga из официальных источников с checksum. Нет host/socket/env mount, тесты immutable для агента; test-before/after и allowlisted diff проверяются отдельным evaluator | в работе: tiny SDK code/repair 11/11 + DB candidate; general OpenHands no-op/bridge ещё требует исправления |
+| R7: durable orchestrator | LangGraph persistent state/checkpoints, tasks/outbox/resume, idempotent шаги, restart/cancel tests. Лимиты wall-time/model calls/tokens; два ключа и pause общие для workers | в работе: PostgresSaver receipt-only foundation; paid graph/shared budgets/resume ещё не приняты |
 | R8: автоматический corpus | Search gaps, многомерный scoring theory/practice, evidence provenance, article/diagram dedup, balanced global/subsystem/component/feature coverage. Theory не выбрасывается; reproduction не выдумывается по title | не начат |
-| R9: feedback и evolution | Коррелированные tests/outcomes/asset versions, repair/harvest/retire, rollback; evaluator changes только shadow old/new + frozen invariants. Внешний сильный judge подключить после действующего GigaChat-loop | не начат |
+| R9: feedback и evolution | Коррелированные tests/outcomes/asset versions, repair/harvest/retire, rollback; evaluator changes только shadow old/new + frozen invariants. Внешний сильный judge подключить после действующего GigaChat-loop | в работе: measured code outcomes/candidate memory; full evolution/external judge ещё не подключены |
 | R10: эксплуатационная приёмка | Backup + восстановление в отдельной БД; synthetic E2E минимум два разных цикла, reboot/resume/quota/network tests, dashboard результатов PDF/ТЗ/diff/log и metrics; только после этого continuous bounded scheduler | в работе: daily backup/isolated restore/reboot health прошли; off-device копии, 2 E2E и scheduler ещё нет |
 
 Если R1 блокирует runtime rollout, продолжать независимые R2–R5 code/tests.

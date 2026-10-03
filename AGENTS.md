@@ -96,6 +96,12 @@ rule/line/column diagnostics; не чинить модельный candidate в�
 ослаблять тесты ради pass. Final outcomes записывать append-only в БД;
 passing asset остаётся candidate, не auto-promoted/production.
 
+R7 начать с official PostgresSaver и receipt-only durable reconciliation:
+checkpoint содержит UUID/hash/metrics/decision, не prompts/cards/source/keys.
+Serializer strict, pickle запрещён. Resume завершённых шагов не вызывает
+модель повторно. Этот foundation не выдавать за полный paid search/code
+orchestrator: shared budgets/outbox/provider attempt recovery ещё обязательны.
+
 ### Формат записи
 
 Добавить или заполнить запись в разделе «Журнал выполнения» `ROADMAP.md`:

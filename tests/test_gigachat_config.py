@@ -46,6 +46,11 @@ class GigaChatSettingsTests(unittest.TestCase):
         self.assertTrue(received["verify_ssl_certs"])
         self.assertEqual(received["scope"], "GIGACHAT_API_PERS")
 
+    def test_scope_allowlist(self):
+        with patch.dict(os.environ,{'GIGACHAT_CREDENTIALS':'synthetic','GIGACHAT_SCOPE':'untrusted'},clear=True):
+            with self.assertRaisesRegex(ValueError,'scope'):
+                GigaChatSettings.from_environment()
+
     def test_factory_constructs_installed_sdk_without_network_call(self) -> None:
         settings = GigaChatSettings(credentials="synthetic-test-key")
         client = GigaChatClientFactory().create(settings)
