@@ -163,6 +163,9 @@ exploration, без автоматического build/prod. Старые sour
 Receipts append-only, hash-linked к mission/metadata/card/PDF; source text,
 abstract, prompts и raw replies не хранятся. Content utility использует только
 cited pages и остаётся lexical baseline, НЕ independent semantic entailment.
+Input identity включает mission hash: изменение trusted goal не переиспользует
+прежний verdict. Packet включает только findings на admitted ranges; diagram
+page также должна входить в них, полезность всего PDF не наследуется автоматически.
 Исходный metadata_title_v1 и frozen 13-case selection cohort сохранять; следующий
 judge/evaluator сравнивать с ними в shadow. Старые failed/inflight PDF attempts
 не повторять автоматически при смене selection policy. JEV и новые paid budgets
