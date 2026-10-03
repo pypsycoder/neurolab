@@ -13,12 +13,14 @@ import subprocess
 import tempfile
 from threading import Thread
 import time
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from dotenv import dotenv_values
 from neurolab.experimental_code import BASELINE, build_code_task, validate_code_asset
 from neurolab.agent_event_metadata import observe_line
 from neurolab.experimental_spec import DraftSpec, content_hash
+from neurolab.code_diagnostics import static_diagnostics
+from neurolab.code_outcomes import project_code_outcome
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = 'neurolab/gpt2giga-eval:v0.3.0'
@@ -67,6 +69,7 @@ def main():
         raise ValueError('root Docker coordinator requires RUN_EXPERIMENTAL_CODE=1')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--spec', required=True)
+    parser.add_argument('--repair-from', type=UUID)
     args = parser.parse_args()
     artifact_root = (ROOT/'runtime/it-research').resolve()
     spec_path = Path(args.spec).resolve()
@@ -78,6 +81,24 @@ def main():
         raise ValueError('spec receipt does not match')
     if spec_path.name != f"spec-{source_receipt['run_id']}.json":
         raise ValueError('spec run identity mismatch')
+    previous_asset = None
+    previous_receipt = None
+    if args.repair_from:
+        previous_path = artifact_root / f'failed-candidate-{args.repair_from}.py'
+        prior_path = artifact_root / f'candidate-receipt-{args.repair_from}.json'
+        if prior_path.is_symlink() or prior_path.stat().st_size > 12000:
+            raise ValueError('repair receipt boundary invalid')
+        previous_receipt = json.loads(prior_path.read_text())
+        project_code_outcome(previous_receipt)
+        if (previous_receipt.get('run_id') != str(args.repair_from) or previous_receipt.get('status') != 'candidate_failed'
+                or previous_receipt.get('spec_run_id') != source_receipt['run_id']
+                or previous_receipt.get('spec_sha256') != content_hash(draft)):
+            raise ValueError('repair specification linkage mismatch')
+        if previous_path.is_symlink() or previous_path.stat().st_size > 16000:
+            raise ValueError('repair source boundary invalid')
+        previous_asset = previous_path.read_bytes()
+        if sha256(previous_asset).hexdigest() != previous_receipt.get('code_sha256'):
+            raise ValueError('repair source hash mismatch')
     cli = ROOT/'runtime/openhands-eval/bin/openhands-1.16.0-linux-arm64'
     if sha256(cli.read_bytes()).hexdigest() != CLI_SHA:
         raise ValueError('code agent binary checksum mismatch')
@@ -104,7 +125,8 @@ def main():
         'gateway':'gpt2giga-0.3.0','evaluator_sha256':frozen_hash,'status':'failed',
         'decision':'retire','production_deployed':False,'tokens_cost':'unavailable',
         'budgets':{'agent_wall_seconds':300,'agent_memory_bytes':2147483648,'agent_cpus':2,'max_tool_actions':8},
-        'self_score':None,'independent_score':None}
+        'self_score':None,'independent_score':None,'code_executed':False,
+        'repair_from':str(args.repair_from) if args.repair_from else None}
     work = Path(tempfile.mkdtemp(prefix='code-sandbox-',dir=artifact_root))
     work.chmod(0o755)
     workspace = work/'workspace'; workspace.mkdir(mode=0o755)
@@ -130,6 +152,11 @@ def main():
         if baseline['passed'] != 0:
             raise ValueError('broken baseline unexpectedly passed')
         receipt['baseline'] = baseline
+        if previous_asset is not None:
+            target.write_bytes(previous_asset)
+            validate_code_asset(experiment)
+        initial_asset = target.read_bytes()
+        receipt['initial_code_sha256'] = sha256(initial_asset).hexdigest()
         require(['docker','network','create','--internal',agent_network])
         require(['docker','network','create',upstream_network])
         values = dotenv_values(ROOT/'.env',interpolate=False)
@@ -175,6 +202,12 @@ def main():
             raise RuntimeError('isolated gateway not ready')
         receipt['phase'] = 'agent_run'
         events: dict[str,int] = {}
+        task = build_code_task(draft)
+        if previous_receipt is not None:
+            feedback = {'previous_run_id':str(args.repair_from),
+                'failed_cases':[item['case'] for item in previous_receipt['evaluation']['cases'] if not item['passed']],
+                'static_diagnostics':previous_receipt.get('static_diagnostics',[])}
+            task += '\nThe existing file is your previous failed implementation. Repair it, do not change tests.\n<INDEPENDENT_FEEDBACK>\n'+json.dumps(feedback,sort_keys=True)+'\n</INDEPENDENT_FEEDBACK>'
         code,agent_output = command(['docker','run','--rm','--name',agent,'--network',agent_network,'--user','1000:1000',
             *security,'--memory','2g','--memory-swap','2g',
             '--tmpfs','/tmp:rw,noexec,nosuid,size=64m','--tmpfs','/home/agent:rw,nosuid,size=32m,uid=1000,gid=1000',
@@ -185,7 +218,7 @@ def main():
             '-e',f'LLM_API_KEY={proxy_key}','-e','LLM_BASE_URL=http://gpt2giga:8090/v1','-e',f'LLM_MODEL=openai/{model}',
             '-v',f'{cli}:/openhands:ro','-v',f'{workspace}:/workspace:ro','-v',f'{experiment}:/workspace/experiment:rw',
             '-w','/workspace/experiment','--entrypoint','/openhands',IMAGE,'--headless','--json','--always-approve',
-            '--exit-without-confirmation','--override-with-envs','--task',build_code_task(draft)],timeout=300,events=events)
+            '--exit-without-confirmation','--override-with-envs','--task',task],timeout=300,events=events)
         receipt['agent_exit_code'] = code
         receipt['agent_event_counts'] = events
         receipt['provider_temporarily_unavailable'] = any(events.get(marker,0) for marker in ('RateLimitError','ReadTimeout','ConnectTimeout'))
@@ -193,17 +226,21 @@ def main():
         command(['docker','rm','-f',agent])
         receipt['phase'] = 'independent_evaluation'
         asset, asset_hash = validate_code_asset(experiment)
+        receipt['static_diagnostics'] = static_diagnostics(target)
         result = evaluate(); receipt['evaluation'] = result
+        receipt['code_executed'] = True
         receipt['independent_score'] = result['passed']/result['total']
         receipt['code_sha256'] = asset_hash
-        receipt['code_changed'] = asset != BASELINE.encode()
+        receipt['code_changed'] = asset != initial_asset
         if sha256(frozen.read_bytes()).hexdigest() != frozen_hash:
             raise ValueError('immutable evaluator changed')
-        if code == 0 and result['passed'] == result['total']:
+        if code == 0 and receipt['code_changed'] and result['passed'] == result['total'] and not receipt['static_diagnostics']:
             destination = artifact_root/f'candidate-{run_id}.py'
             destination.write_bytes(asset); destination.chmod(0o600)
             receipt.update(status='candidate_passed',decision='harvest_parts',next_step='independent architecture integration experiment')
         else:
+            destination = artifact_root/f'failed-candidate-{run_id}.py'
+            destination.write_bytes(asset); destination.chmod(0o600)
             receipt.update(status='candidate_failed',decision='repair',next_step='bounded repair from failed frozen case IDs')
     finally:
         for name in containers:
@@ -216,6 +253,9 @@ def main():
         shutil.rmtree(work)
         receipt['wall_seconds'] = round(time.monotonic()-started,2)
         (artifact_root/f'code-receipt-{run_id}.json').write_text(json.dumps(receipt,sort_keys=True)+'\n')
+        if receipt['code_executed']:
+            path = artifact_root/f'candidate-receipt-{run_id}.json'
+            path.write_text(json.dumps(receipt,sort_keys=True)+'\n'); path.chmod(0o600)
         print(json.dumps(receipt,sort_keys=True))
     if receipt['status'] != 'candidate_passed':
         raise SystemExit(75 if receipt.get('provider_temporarily_unavailable') else 1)

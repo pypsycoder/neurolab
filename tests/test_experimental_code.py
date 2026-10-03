@@ -18,6 +18,9 @@ class ExperimentalCodeTests(unittest.TestCase):
         task = build_code_task(DraftSpec.model_validate(raw_draft()))
         self.assertIn('ONLY /workspace/experiment/provenance.py', task)
         self.assertIn('not mounted', task)
+        self.assertIn('file already exists', task)
+        self.assertIn('Do not retry create', task)
+        self.assertIn('truthful security_risk', task)
 
     def test_asset_has_single_regular_bounded_file(self):
         with tempfile.TemporaryDirectory() as temp:

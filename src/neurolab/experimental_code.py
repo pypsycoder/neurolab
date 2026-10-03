@@ -23,6 +23,10 @@ Edit ONLY /workspace/experiment/provenance.py. No other writable project path is
 You MUST use a terminal or file-editor tool to change that file on disk. A prose response
 or a code block alone is not implementation and will fail independent evaluation.
 Your current directory /workspace/experiment is writable; its parent is read-only.
+The file already exists. First view it, then use str_replace to replace its existing
+implementation. The create command cannot overwrite an existing file. Do not retry create.
+Use the tool schema exactly, including truthful security_risk when required by OpenHands.
+Prefer one complete replacement, then finish; repeated failed tool calls exhaust the action limit.
 Implement affected_nodes(edges: list[tuple[str,str]], failed: str) -> list[str].
 Return sorted unique descendants including failed; an isolated failed node returns [failed].
 Deduplicate edges. Reject ANY cycle with ValueError, including a disconnected cycle or self-loop.

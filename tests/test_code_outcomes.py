@@ -15,6 +15,28 @@ def receipt():
 
 
 class CodeOutcomeTests(unittest.TestCase):
+    def test_openhands_requires_actual_change_and_successful_runtime(self):
+        raw = receipt()
+        raw.update(agent='OpenHands-CLI-1.16.0', agent_exit_code=0, code_changed=True)
+        projected = project_code_outcome(raw)
+        self.assertTrue(projected['runtime_gate_passed'])
+        for exit_code, changed in ((-9, True), (124, True), (0, False)):
+            with self.subTest(exit_code=exit_code, changed=changed):
+                failed = copy.deepcopy(raw)
+                failed.update(agent_exit_code=exit_code, code_changed=changed)
+                with self.assertRaises(ValueError):
+                    project_code_outcome(failed)
+                failed.update(status='candidate_failed', decision='repair')
+                self.assertFalse(project_code_outcome(failed)['runtime_gate_passed'])
+
+    def test_openhands_malformed_runtime_gate_is_not_inferred(self):
+        raw = receipt(); raw.update(agent='OpenHands-CLI-1.16.0', code_changed=True, agent_exit_code=True)
+        with self.assertRaises(ValueError):
+            project_code_outcome(raw)
+        raw.pop('agent_exit_code')
+        with self.assertRaises(ValueError):
+            project_code_outcome(raw)
+
     def test_projection_excludes_raw_content_and_does_not_promote(self):
         raw=receipt(); raw['raw_prompt']='secret content'
         projected=project_code_outcome(raw)

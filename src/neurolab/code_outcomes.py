@@ -26,7 +26,7 @@ def project_code_outcome(receipt):
         raise ValueError('code outcome exceeds budget')
     if receipt['boundary']!='public_synthetic_experimental_only' or receipt['production_deployed'] is not False or receipt['code_executed'] is not True:
         raise ValueError('outcome boundary mismatch')
-    if receipt['agent']!='GigaChat-SDK-structured-pure-function':
+    if receipt['agent'] not in {'GigaChat-SDK-structured-pure-function','OpenHands-CLI-1.16.0'}:
         raise ValueError('unsupported code outcome agent')
     if _suite(receipt['baseline'])[0]!=0:
         raise ValueError('baseline did not fail')
@@ -37,7 +37,12 @@ def project_code_outcome(receipt):
     for item in diagnostics:
         if set(item)!={'code','line','column'} or item['code'] not in RULES or type(item['line']) is not int or type(item['column']) is not int or not 1<=item['line']<=500 or not 1<=item['column']<=16000:
             raise ValueError('static diagnostics invalid')
-    accepted=passed==11 and not diagnostics
+    runtime_gate = True
+    if receipt['agent']=='OpenHands-CLI-1.16.0':
+        if type(receipt.get('agent_exit_code')) is not int or not -255 <= receipt['agent_exit_code'] <= 255 or type(receipt.get('code_changed')) is not bool:
+            raise ValueError('agent execution receipt malformed')
+        runtime_gate = receipt['agent_exit_code'] == 0 and receipt['code_changed']
+    accepted=passed==11 and not diagnostics and runtime_gate
     expected_status='candidate_passed' if accepted else 'candidate_failed'
     expected_decision='harvest_parts' if accepted else 'repair'
     if receipt['status']!=expected_status or receipt['decision']!=expected_decision or receipt['independent_score']!=passed/11:
@@ -46,6 +51,8 @@ def project_code_outcome(receipt):
         'boundary':receipt['boundary'],'agent':receipt['agent'],'status':expected_status,'decision':expected_decision,
         'passed':passed,'total':11,'failed_cases':failed,'independent_score':passed/11,
         'production_deployed':False,'self_score':receipt['self_score'],'static_diagnostics':diagnostics}
+    if receipt['agent']=='OpenHands-CLI-1.16.0':
+        result.update(agent_exit_code=receipt['agent_exit_code'],code_changed=receipt['code_changed'],runtime_gate_passed=runtime_gate)
     score=result['self_score']
     if score is not None and (type(score) not in {float,int} or not math.isfinite(score) or not 0<=score<=1):
         raise ValueError('self score invalid')

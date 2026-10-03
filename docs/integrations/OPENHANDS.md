@@ -101,8 +101,30 @@ command. Результат всегда имеет решение `review_requi
 ignored `runtime/`; он не является артефактом для Git или клинического
 контура.
 
-## Следующий безопасный шаг
+## Текущий bounded research route
 
-Собрать deterministic architectural smoke этапа E поверх уже подтверждённых
-synthetic contracts. OpenHands-run остаётся ручным и approval-gated; для
-research-пути по-прежнему действует ADR-0003: нужен trace поиска.
+Исторический manual runbook выше не задаёт порядок нового experimental
+цикла. Его актуальная приёмка и фактические результаты находятся только
+в разделе 7 `ROADMAP.md`. Для public/synthetic экспериментов владелец
+разрешил выполнение подэтапов без промежуточных подтверждений; clinical,
+production, merge/deploy и расширение доступа этим не разрешены.
+
+`scripts/run_experimental_code.sh` исполняет только receipt-backed strict
+spec для allowlisted provenance family. Pinned CLI получает RO parent и
+только writable experiment, без repo/tests/host socket/секретов. Agent
+ограничен 8 actions и 300 seconds; frozen evaluator работает отдельно
+network-none. Success требует фактического code change и independent gate,
+не CLI exit code или сообщения модели.
+
+Перед повтором no-op использовать `scripts/verify_openhands_tools.py` с
+`RUN_OPENHANDS_TOOL_PROBE=1` через root Docker coordinator на RP5. Это
+offline fixed OpenAI fixture view→str_replace→finish на disposable probe.txt:
+internal network, нет реальных LLM вызовов или ключей. `--negative-control`
+проверяет отказ при отсутствии `security_risk`. Поле требуется SDK security
+analyzer даже в headless/always-approve; в live route его должна корректно
+выдать модель. Не добавлять fictitious LOW и не отключать analyzer ради pass.
+Fixture не генерирует candidate algorithm и не является coding fallback.
+
+Диагностика хранит только event counts и fixed failure categories; полные
+tool args/error/prompt/provider logs не сохраняются. Budget/resume ограничения
+R7 остаются обязательными до continuous mode.

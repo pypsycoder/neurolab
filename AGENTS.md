@@ -102,6 +102,18 @@ Serializer strict, pickle запрещён. Resume завершённых шаг
 модель повторно. Этот foundation не выдавать за полный paid search/code
 orchestrator: shared budgets/outbox/provider attempt recovery ещё обязательны.
 
+Если владелец отложил выбор нового бюджета, продолжать независимые R4/R6
+проверки с существующими лимитами, а не включать continuous paid graph.
+Перед повторным live OpenHands запуском после no-op проверять pinned CLI
+через offline tool replay и negative control. `exit 0` не доказывает запись
+файла или прохождение evaluator. Не отключать security analyzer и не
+подставлять `security_risk` вместо модели в реальном gateway: обязательные
+аргументы должна выдать сама модель. Диагностика содержит только fixed
+error categories/counters; prompts, tool arguments и raw errors не хранить.
+Vision принимает только complete `finish_reason=stop`; отдельный redacted
+receipt сохраняет попытки, known usage и cleanup. Missing usage — unknown,
+не нулевая стоимость; extracted card остаётся needs_review до independent gate.
+
 ### Формат записи
 
 Добавить или заполнить запись в разделе «Журнал выполнения» `ROADMAP.md`:
