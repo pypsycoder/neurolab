@@ -84,6 +84,8 @@ def main() -> None:
     parser.add_argument("--source-key", required=True); parser.add_argument("--document-id", required=True); parser.add_argument("--arxiv-id", required=True)
     parser.add_argument("--page", type=int, action="append", dest="pages"); parser.add_argument("--maximum-pages", type=int, default=8)
     args = parser.parse_args(); database_url = os.environ.get("DATABASE_URL", "")
+    from neurolab.selection_storage import require_metadata_selection
+    require_metadata_selection(database_url, args.source_key)
     identity = load_document_identity(database_url, source_key=args.source_key, document_id=args.document_id)
     request = OpenAccessPdfRequest(identity.source_key, args.arxiv_id, identity.license_id)
     if identity.provider != "arxiv" or identity.document_url != request.url: raise RuntimeError("diagram route requires the exact verified arXiv document")

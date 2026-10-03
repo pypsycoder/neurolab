@@ -32,7 +32,7 @@ class CorpusFulltextTests(unittest.TestCase):
         self.document = FullTextReceipt(self.item.source_key, "arxiv", "https://export.arxiv.org/pdf/2609.12345",
                                        "CC-BY-4.0", "c" * 64, 123, 7, "d" * 64, 2000)
 
-    def invoke(self, *, execute=True, license_error=None, pdf_error=None, corpus=None):
+    def invoke(self, *, execute=True, license_error=None, pdf_error=None, corpus=None, eligible=True):
         output = io.StringIO()
         def licence_call(*args, **kwargs):
             self.assertTrue(self.connections[1].__exit__.called)
@@ -45,6 +45,7 @@ class CorpusFulltextTests(unittest.TestCase):
              patch.object(self.module, "verify_open_access_pdf", return_value=self.document, side_effect=pdf_error) as pdf_api, \
              patch.object(self.module, "persist_license_receipt") as save_license, \
              patch.object(self.module, "persist_fulltext_receipt", return_value="document-uuid") as save_pdf, \
+             patch.object(self.module, "load_metadata_selections", return_value=[self.item] if eligible else []), \
              patch.dict("os.environ", {"DATABASE_URL": "synthetic"}), \
              patch("sys.argv", ["preflight"] + (["--execute"] if execute else [])), \
              patch("sys.stdout", output):
@@ -57,6 +58,13 @@ class CorpusFulltextTests(unittest.TestCase):
         pdf.assert_not_called()
         self.reserve.execute.assert_not_called()
         self.assertEqual(result["status"], "planned")
+
+    def test_relevance_gate_stops_before_reservation_license_and_pdf(self):
+        result, lic, pdf, sl, sp = self.invoke(eligible=False)
+        lic.assert_not_called()
+        pdf.assert_not_called()
+        self.reserve.execute.assert_not_called()
+        self.assertEqual(result["status"], "queue_exhausted")
 
     def test_license_refusal_never_downloads_or_persists_pdf(self):
         result, lic, pdf, sl, sp = self.invoke(license_error=LicenseVerificationError("RAW SECRET"))

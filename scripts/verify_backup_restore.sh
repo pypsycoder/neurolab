@@ -10,6 +10,8 @@ EXPECT_DOCUMENT_CARD="${NEUROLAB_RESTORE_EXPECT_DOCUMENT_CARD:-}"
 EXPECT_CYCLE_RUN="${NEUROLAB_RESTORE_EXPECT_CYCLE_RUN:-}"
 EXPECT_GAP_RUN="${NEUROLAB_RESTORE_EXPECT_GAP_RUN:-}"
 EXPECT_FULLTEXT_RUN="${NEUROLAB_RESTORE_EXPECT_FULLTEXT_RUN:-}"
+EXPECT_REJECTED_SOURCE="${NEUROLAB_RESTORE_EXPECT_REJECTED_SOURCE:-}"
+[[ -z "$EXPECT_REJECTED_SOURCE" || "$EXPECT_REJECTED_SOURCE" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid expected source digest'; exit 2; }
 for identity in "$EXPECT_CODE_RUN" "$EXPECT_DIAGRAM_CARD" "$EXPECT_DOCUMENT_CARD" "$EXPECT_CYCLE_RUN" "$EXPECT_GAP_RUN" "$EXPECT_FULLTEXT_RUN"; do
   [[ -z "$identity" || "$identity" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo 'Invalid expected artifact UUID'; exit 2; }
 done
@@ -73,5 +75,10 @@ if [[ -n "$EXPECT_FULLTEXT_RUN" ]]; then
   PRESENT="$(printf "SELECT CASE WHEN EXISTS (SELECT 1 FROM it_research.corpus_fulltext_attempts WHERE run_id='%s' AND status IN ('completed','license_unverified','document_unverified') AND receipt->>'run_id'=run_id::text AND receipt->>'status'=status) THEN 'present' ELSE 'missing' END;\n" "$EXPECT_FULLTEXT_RUN" | restore_psql)"
   [[ "$PRESENT" == present ]] || { echo 'Expected terminal fulltext preflight missing'; exit 1; }
   echo 'backup_restore: exact_terminal_fulltext_preflight_present'
+fi
+if [[ -n "$EXPECT_REJECTED_SOURCE" ]]; then
+  PRESENT="$(printf "SELECT CASE WHEN (SELECT count(*) FROM (SELECT DISTINCT ON (mission_id) mission_id,decision FROM it_research.selection_receipts WHERE source_key='%s' AND policy_version='research-selection-v1' AND stage='metadata' AND receipt->>'source_key'=source_key ORDER BY mission_id,created_at DESC,id DESC) latest WHERE decision='reject')=6 THEN 'present' ELSE 'missing' END;\n" "$EXPECT_REJECTED_SOURCE" | restore_psql)"
+  [[ "$PRESENT" == present ]] || { echo 'Expected six-mission source rejection missing'; exit 1; }
+  echo 'backup_restore: exact_six_mission_source_rejection_present'
 fi
 echo "backup_restore: passed; migrations=$COUNT; disposable_database_removed_on_exit"

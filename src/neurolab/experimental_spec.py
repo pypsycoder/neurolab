@@ -145,12 +145,25 @@ def load_experimental_packet(database_url: str, *, maximum_documents: int = 4) -
                         ON d.id=c.document_id AND d.source_key=c.source_key
                         WHERE c.reviewer_status IN ('needs_review','reviewed') AND d.provider='arxiv'
                         AND d.license_id IN ('CC-BY-4.0','CC0-1.0','PUBLIC-DOMAIN')
+                        AND EXISTS (SELECT 1 FROM it_research.selection_receipts sr
+                            JOIN it_research.document_cards dc ON dc.document_id=c.document_id AND dc.source_key=c.source_key
+                            WHERE sr.source_key=c.source_key AND sr.policy_version='research-selection-v1'
+                            AND sr.stage='content' AND sr.mission_id='provenance'
+                            AND sr.decision IN ('useful_experimental','explore')
+                            AND sr.receipt->>'document_sha256'=d.pdf_sha256
+                            AND sr.receipt->>'card_sha256'=dc.card_sha256)
                         ORDER BY c.generated_at DESC, c.id LIMIT %s""", (maximum_documents,))
                     rows.extend(dict(row, kind=kind) for row in cursor.fetchall())
     except Exception:
         raise RuntimeError("experimental evidence read failed") from None
     notes = []
+    from neurolab.selection_storage import admitted_content_pages
+    eligible = admitted_content_pages(database_url, mission_id="provenance")
     for row in rows:
+        if row["kind"] == "document" and (row["source_key"], row["pdf_sha256"], row["card_sha256"]) not in eligible:
+            continue
+        if row["kind"] == "diagram" and not any(key[0] == row["source_key"] and key[1] == row["pdf_sha256"] for key in eligible):
+            continue
         card = row["card"]
         if (content_hash(card) != row["card_sha256"] or card.get("source_key") != row["source_key"]
                 or card.get("document_id") != row["document_id"]
@@ -163,12 +176,20 @@ def load_experimental_packet(database_url: str, *, maximum_documents: int = 4) -
             for finding in card["findings"]:
                 if not 1 <= finding["page_start"] <= finding["page_end"] <= row["page_count"]:
                     raise ValueError("experimental finding page mismatch")
+                admitted_pages = eligible[(row["source_key"], row["pdf_sha256"], row["card_sha256"])]
+                if not any(start <= finding["page_start"] <= finding["page_end"] <= end for start, end in admitted_pages):
+                    continue
                 findings.append(f"pages {finding['page_start']}-{finding['page_end']}: {finding['summary']}")
                 page_ranges.append(PageLocator(page_start=finding["page_start"], page_end=finding["page_end"]))
+            if not findings:
+                continue
         else:
             page = card["page_number"]
             if not 1 <= page <= row["page_count"]:
                 raise ValueError("experimental diagram page mismatch")
+            if not any(key[0] == row["source_key"] and key[1] == row["pdf_sha256"]
+                       and any(start <= page <= end for start, end in ranges) for key, ranges in eligible.items()):
+                continue
             summary = card["summary"]
             page_ranges = [PageLocator(page_start=page, page_end=page)]
             findings = [f"page {page}: {item}" for item in card["connections"] + card["feedback_or_control"]]

@@ -122,7 +122,8 @@ Vision принимает только complete `finish_reason=stop`; отдел
 receipt сохраняет попытки, known usage и cleanup. Missing usage — unknown,
 не нулевая стоимость; extracted card остаётся needs_review до independent gate.
 
-R8 использует existing scholarly adapters и `corpus-gap-v1`, не новый агент.
+R8 использует existing scholarly adapters, не новый агент. `corpus-gap-v1`
+сохраняется как legacy; текущие маршруты применяют `research-selection-v1`.
 Одна invocation допускает максимум один reserved search (по 2 metadata records
 на provider), ни одного LLM call. Шаблон резервируется в PostgreSQL до сети;
 inflight/unavailable/completed не повторяются автоматически. После исчерпания
@@ -149,6 +150,23 @@ timeout/unknown и invalid output блокируют автоматически�
 disabled, finish_reason=stop обязателен. Cache не является account-wide budget
 или полноценным R7 orchestration. Новая card остаётся needs_review; структурный
 assessment не является semantic verification или reproduction.
+
+### Трёхступенчатый отбор IT-исследований
+
+`research-selection-v1`: trusted mission/problem → title+abstract admission →
+exact-PDF/card content utility → task-specific experimental packet. Все три
+ступени обязательны в automatic search/PDF/text/Vision/spec routes. Title-only
+или missing abstract означает hold, не reject и не permission paid analysis.
+Нерелевантность задаче не означает научную недостоверность; theory остаётся
+exploration, без автоматического build/prod. Старые source/card rows не удалять.
+Нельзя подавать в ТЗ карточку только за schema/coverage pass или высокий self-score.
+Receipts append-only, hash-linked к mission/metadata/card/PDF; source text,
+abstract, prompts и raw replies не хранятся. Content utility использует только
+cited pages и остаётся lexical baseline, НЕ independent semantic entailment.
+Исходный metadata_title_v1 и frozen 13-case selection cohort сохранять; следующий
+judge/evaluator сравнивать с ними в shadow. Старые failed/inflight PDF attempts
+не повторять автоматически при смене selection policy. JEV и новые paid budgets
+не включать без отдельного решения; full-spec/clinical gates остаются закрыты.
 
 ### Формат записи
 

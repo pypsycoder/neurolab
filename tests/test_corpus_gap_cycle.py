@@ -38,6 +38,8 @@ class CorpusGapCycleTests(unittest.TestCase):
              patch.object(self.module, "run_it_research", return_value=run, side_effect=error) as search, \
              patch.object(self.module, "persist_run") as persist, \
              patch.object(self.module, "record_synthesis_status"), \
+             patch.object(self.module, "load_metadata_selections", return_value=()), \
+             patch.object(self.module, "persist_selection"), \
              patch.dict("os.environ", {"DATABASE_URL": "synthetic"}), \
              patch("sys.argv", ["gap_cycle"] + (["--execute"] if execute else [])), \
              patch("sys.stdout", output):
@@ -54,7 +56,7 @@ class CorpusGapCycleTests(unittest.TestCase):
     def test_execution_commits_reservation_and_finishes_redacted_receipt(self):
         def network(*args, **kwargs):
             self.assertTrue(self.connections[1].__exit__.called)
-            self.assertEqual(args[0].arxiv_topic_terms, ("agent", "architecture", "orchestration"))
+            self.assertEqual(args[0].arxiv_topic_terms, ("agent", "orchestration", "workflow"))
             return ItResearchRun(args[0], "2026-10-03", (), (), "review_required", ())
         output, search, persist = self.invoke(error=network)
         self.assertEqual(search.call_count, 1)

@@ -9,7 +9,9 @@ from uuid import uuid4
 
 import psycopg
 
-from neurolab.corpus_gap_plan import VERSION, plan_corpus_gaps
+from neurolab.research_selection import VERSION, MISSIONS, screen_metadata
+from neurolab.selection_plan import plan_selected_corpus as plan_corpus_gaps
+from neurolab.selection_storage import load_metadata_selections, persist_selection
 from neurolab.it_research import ItResearchError, ItResearchQuery, run_it_research
 from neurolab.research_storage import load_corpus_assessments, persist_run, record_synthesis_status
 from neurolab.research_corpus import evaluate_coverage
@@ -26,10 +28,11 @@ def main():
         documents = frozenset(row[0] for row in connection.execute(
             "SELECT DISTINCT source_key FROM it_research.documents"))
         attempted_fulltext = frozenset(row[0] for row in connection.execute(
-            "SELECT source_key FROM it_research.corpus_fulltext_attempts WHERE policy_version=%s", (VERSION,)))
+            "SELECT source_key FROM it_research.corpus_fulltext_attempts"))
     before = load_corpus_assessments(database_url)
+    eligible = frozenset(r.source_key for r in load_metadata_selections(database_url))
     plan = plan_corpus_gaps(before, attempted_templates=attempted, document_source_keys=documents,
-                           attempted_fulltext_source_keys=attempted_fulltext)
+                           attempted_fulltext_source_keys=attempted_fulltext, eligible_source_keys=eligible)
     run_id = str(uuid4())
     receipt = {"run_id": run_id, "checked_at": datetime.now(UTC).isoformat(),
                "status": "planned", "before": plan, "new_model_calls": 0}
@@ -51,13 +54,24 @@ def main():
                                   api_key=os.environ.get("OPENALEX_API_KEY"),
                                   mailto=os.environ.get("CROSSREF_MAILTO"))
             persist_run(database_url, run, artifact_ref=f"runtime/it-research/corpus-gap-{run_id}.json")
+            decisions = []
+            for item in run.items:
+                # Assess every existing trusted mission: discovery may find a
+                # useful source for a different gap, but cannot invent a goal.
+                for mission in MISSIONS:
+                    selection = screen_metadata(item, mission.mission_id)
+                    persist_selection(database_url, selection)
+                    decisions.append(selection.decision)
+            eligible = frozenset(r.source_key for r in load_metadata_selections(database_url))
             after = load_corpus_assessments(database_url)
             receipt.update(status="completed", public_record_count=len(run.items),
+                           selection_decisions={d: decisions.count(d) for d in sorted(set(decisions))},
                            provider_errors=list(run.provider_errors),
                            new_unique_sources=max(0, evaluate_coverage(after).unique_source_count -
                                                   evaluate_coverage(before).unique_source_count),
                            after=plan_corpus_gaps(after, attempted_templates=attempted + (template["template_id"],),
-                                                 document_source_keys=documents, attempted_fulltext_source_keys=attempted_fulltext))
+                                                 document_source_keys=documents, attempted_fulltext_source_keys=attempted_fulltext,
+                                                 eligible_source_keys=eligible))
             record_synthesis_status(database_url, evaluate_coverage(after),
                                     artifact_ref=f"runtime/it-research/corpus-gap-{run_id}.json")
         except ItResearchError:

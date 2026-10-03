@@ -9,7 +9,9 @@ from uuid import uuid4
 
 import psycopg
 
-from neurolab.corpus_gap_plan import VERSION, plan_corpus_gaps
+from neurolab.research_selection import VERSION
+from neurolab.selection_plan import plan_selected_corpus as plan_corpus_gaps
+from neurolab.selection_storage import load_metadata_selections
 from neurolab.fulltext_verification import OpenAccessPdfRequest, FullTextVerificationError, verify_open_access_pdf
 from neurolab.license_verification import ArxivLicenseRequest, LicenseVerificationError, verify_arxiv_license
 from neurolab.research_storage import load_corpus_assessments, persist_fulltext_receipt, persist_license_receipt
@@ -26,9 +28,10 @@ def main():
         documents = frozenset(row[0] for row in connection.execute(
             "SELECT DISTINCT source_key FROM it_research.documents"))
         attempted = frozenset(row[0] for row in connection.execute(
-            "SELECT source_key FROM it_research.corpus_fulltext_attempts WHERE policy_version=%s", (VERSION,)))
+            "SELECT source_key FROM it_research.corpus_fulltext_attempts"))
     plan = plan_corpus_gaps(load_corpus_assessments(database_url), attempted_templates=searched,
-                           document_source_keys=documents, attempted_fulltext_source_keys=attempted)
+                           document_source_keys=documents, attempted_fulltext_source_keys=attempted,
+                           eligible_source_keys=frozenset(r.source_key for r in load_metadata_selections(database_url)))
     candidate = next(iter(plan["fulltext_candidates"]), None)
     run_id = str(uuid4())
     receipt = {"run_id": run_id, "policy_version": VERSION, "status": "planned",

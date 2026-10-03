@@ -104,6 +104,9 @@ def main() -> None:
     arguments = parser.parse_args()
 
     database_url = os.environ.get("DATABASE_URL", "")
+    from neurolab.selection_storage import require_metadata_selection, persist_selection
+    from neurolab.research_selection import assess_content
+    selections = require_metadata_selection(database_url, arguments.source_key)
     identity = load_document_identity(
         database_url, source_key=arguments.source_key, document_id=arguments.document_id
     )
@@ -158,6 +161,10 @@ def main() -> None:
         if arguments.persist:
             result["card_id"] = persist_document_card(database_url, card)
             audit["card_id"] = result["card_id"]
+            utility = [assess_content(card, selected, page_texts) for selected in selections]
+            for selection in utility:
+                persist_selection(database_url, selection)
+            audit["utility_decisions"] = {s.mission_id: s.decision for s in utility}
         audit.update(status="needs_review", card_sha256=card.card_sha256)
         OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
         OUTPUT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

@@ -226,8 +226,12 @@ class _ArxivMetaParser(HTMLParser):
         self.title = ""
         self.authors: list[str] = []
         self.published_on = ""
+        self.abstract_parts: list[str] = []
+        self.in_abstract = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.casefold() == "blockquote" and any(name == "class" and value and "abstract" in value.split() for name, value in attrs):
+            self.in_abstract = True
         if tag.casefold() != "meta":
             return
         values = {name.casefold(): value for name, value in attrs if value is not None}
@@ -239,6 +243,14 @@ class _ArxivMetaParser(HTMLParser):
             self.authors.append(content)
         elif name in {"citation_date", "dc.date"} and not self.published_on:
             self.published_on = content
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() == "blockquote":
+            self.in_abstract = False
+
+    def handle_data(self, data: str) -> None:
+        if self.in_abstract:
+            self.abstract_parts.append(data)
 
 
 def _lookup_arxiv_abstract_page(arxiv_id: str, transport: ArxivAbstractTransport) -> ResearchItem:
@@ -268,7 +280,7 @@ def _lookup_arxiv_abstract_page(arxiv_id: str, transport: ArxivAbstractTransport
             "arXiv preprint; peer-review status must be checked separately.",
             "Exact arXiv abstract metadata fallback used after an Atom API refusal.",
         ),
-        abstract="",
+        abstract=_clean_text(" ".join(parser.abstract_parts)).removeprefix("Abstract:"),
         authors=tuple(parser.authors[:100]),
     )
 
@@ -414,7 +426,7 @@ def search_openalex(
     params = {
         "search.exact": query.topic.strip(),
         "per-page": str(query.max_results_per_provider),
-        "select": "id,title,publication_date,authorships,doi,primary_location",
+        "select": "id,title,publication_date,authorships,doi,primary_location,abstract_inverted_index",
     }
     headers = {"User-Agent": "neurolab-it-research/0.1"}
     if api_key and api_key.strip():
@@ -430,6 +442,28 @@ def search_openalex(
         if isinstance(result, dict)
         if (item := _openalex_item(result, checked_on)) is not None
     )
+
+
+def _openalex_abstract(index: object) -> str:
+    """Bounded transient reconstruction of official word-position metadata."""
+    if index is None:
+        return ""
+    if not isinstance(index, dict) or len(index) > 5000:
+        raise ItResearchError("OpenAlex abstract index outside boundary")
+    positions = {}
+    for word, offsets in index.items():
+        if not isinstance(word, str) or len(word) > 200 or not isinstance(offsets, list) or len(offsets) > 5000:
+            raise ItResearchError("OpenAlex abstract index invalid")
+        for offset in offsets:
+            if type(offset) is not int or not 0 <= offset < 5000 or offset in positions:
+                raise ItResearchError("OpenAlex abstract position invalid")
+            positions[offset] = word
+    if positions and set(positions) != set(range(max(positions) + 1)):
+        raise ItResearchError("OpenAlex abstract index incomplete")
+    text = " ".join(positions[i] for i in sorted(positions))
+    if len(text) > 20000:
+        raise ItResearchError("OpenAlex abstract outside boundary")
+    return _clean_text(text)
 
 
 def _openalex_item(result: dict[str, object], checked_on: str) -> ResearchItem | None:
@@ -456,7 +490,7 @@ def _openalex_item(result: dict[str, object], checked_on: str) -> ResearchItem |
         checked_on=checked_on,
         evidence_level="secondary",
         limitations=("OpenAlex metadata; verify publisher record and full-text licence separately.",),
-        abstract="",
+        abstract=_openalex_abstract(result.get("abstract_inverted_index")),
         authors=authors,
         doi=_clean_text(result.get("doi")) or None,
     )
