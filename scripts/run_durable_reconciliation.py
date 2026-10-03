@@ -49,7 +49,8 @@ def main():
                     (run_id,EVALUATOR_SHA256,result['code_sha256'])).fetchone()
                 if assessment_row:
                     assessment=project_cycle_assessment(assessment_row['assessment'])
-                    if assessment_hash(assessment)!=assessment_row['assessment_sha256']:
+                    if (assessment_hash(assessment)!=assessment_row['assessment_sha256'] or assessment['run_id']!=run_id
+                            or assessment['code_sha256']!=result['code_sha256']):
                         raise ValueError('assessment integrity failure')
                     result.update(cycles_evaluation=assessment['cycles_evaluation'],assessment_sha256=assessment_row['assessment_sha256'])
                     if assessment['status']=='failed':

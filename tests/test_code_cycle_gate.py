@@ -25,6 +25,15 @@ class CodeCycleGateTests(unittest.TestCase):
         value['cycles_evaluator_sha256']='b'*64
         with self.assertRaises(ValueError):
             project_cycle_assessment(value)
+
+    def test_cycle_metrics_cannot_carry_raw_extra_fields(self):
+        value={'evaluator_version':VERSION,'total':9,'passed':9,'cases':[{'case':name,'passed':True} for name in sorted(CASES)]}
+        value['raw_output']='private'
+        with self.assertRaises(ValueError):
+            validate_cycle_result(value)
+        value.pop('raw_output'); value['cases'][0]['raw_output']='private'
+        with self.assertRaises(ValueError):
+            validate_cycle_result(value)
     def test_old_frozen_suite_is_unchanged(self):
         path=Path(__file__).parent/'fixtures/provenance_evaluator.py'
         self.assertEqual(sha256(path.read_bytes()).hexdigest(),'f2c98b97dff5d4bd37dd826eb72d789b915f6497fa622b158b86a550b89d066a')
