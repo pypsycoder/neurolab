@@ -15,6 +15,7 @@ class ReconciliationState(TypedDict, total=False):
     boundary: str
     spec_sha256: str
     outcome_sha256: str
+    assessment_sha256: str | None
     phase: str
     decision: str
     independent_passed: int
@@ -57,6 +58,7 @@ def build_reconciliation_graph(checkpointer, load_spec, load_outcome, *, stop_af
             elif cycles_passed != 9:
                 raise ValueError('failed cycle gate cannot be harvested')
         return {'outcome_sha256':digest(row['outcome_sha256']),'independent_passed':passed,
+            'assessment_sha256':digest(row['assessment_sha256']) if row.get('assessment_sha256') else None,
             'independent_total':total,'cycles_passed':cycles_passed,'decision':decision,'production_deployed':False,'phase':'outcome_checked'}
 
     def decision_node(state):

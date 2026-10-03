@@ -7,6 +7,7 @@ from uuid import UUID
 from neurolab.durable_reconciliation import build_reconciliation_graph, run_or_resume
 from neurolab.experimental_spec import DraftSpec, content_hash
 from neurolab.code_outcomes import outcome_hash
+from neurolab.code_cycle_gate import EVALUATOR_SHA256, project_cycle_assessment, assessment_hash
 
 
 def main():
@@ -41,7 +42,19 @@ def main():
             row=connection.execute('SELECT outcome,outcome_sha256 FROM it_research.experimental_code_runs WHERE run_id=%s',(run_id,)).fetchone()
             if not row or outcome_hash(row['outcome'])!=row['outcome_sha256'] or row['outcome']['run_id']!=run_id:
                 raise ValueError('outcome integrity failure')
-            return dict(row['outcome'],outcome_sha256=row['outcome_sha256'])
+            result=dict(row['outcome'],outcome_sha256=row['outcome_sha256'])
+            if 'cycles_evaluation' not in result:
+                assessment_row=connection.execute('''SELECT assessment,assessment_sha256
+                    FROM it_research.code_cycle_assessments WHERE run_id=%s AND evaluator_sha256=%s AND code_sha256=%s''',
+                    (run_id,EVALUATOR_SHA256,result['code_sha256'])).fetchone()
+                if assessment_row:
+                    assessment=project_cycle_assessment(assessment_row['assessment'])
+                    if assessment_hash(assessment)!=assessment_row['assessment_sha256']:
+                        raise ValueError('assessment integrity failure')
+                    result.update(cycles_evaluation=assessment['cycles_evaluation'],assessment_sha256=assessment_row['assessment_sha256'])
+                    if assessment['status']=='failed':
+                        result['decision']='repair'
+            return result
         graph=build_reconciliation_graph(saver,load_spec,load_outcome,stop_after_spec=args.stop_after_spec)
         result=run_or_resume(graph,str(args.workflow_id),str(args.spec_run_id),str(args.code_run_id),cancel=args.cancel)
         print(json.dumps(result,sort_keys=True))

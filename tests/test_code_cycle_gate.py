@@ -3,7 +3,7 @@ from hashlib import sha256
 from pathlib import Path
 import tempfile
 import unittest
-from neurolab.code_cycle_gate import CASES, VERSION, validate_cycle_result
+from neurolab.code_cycle_gate import CASES, VERSION, EVALUATOR_SHA256, validate_cycle_result, project_cycle_assessment, assessment_hash
 from neurolab.code_outcomes import project_code_outcome
 from test_code_outcomes import receipt
 
@@ -12,6 +12,19 @@ cycles=importlib.util.module_from_spec(spec); spec.loader.exec_module(cycles)
 
 
 class CodeCycleGateTests(unittest.TestCase):
+    def test_supplementary_fixture_is_pinned(self):
+        self.assertEqual(sha256((Path(__file__).parent/'fixtures/provenance_cycle_evaluator.py').read_bytes()).hexdigest(),EVALUATOR_SHA256)
+
+    def test_reassessment_is_redacted_and_bound_to_the_frozen_gate(self):
+        value={'run_id':'00000000-0000-0000-0000-000000000001','code_sha256':'a'*64,'cycles_evaluator_sha256':EVALUATOR_SHA256,
+               'cycles_evaluation':{'evaluator_version':VERSION,'total':9,'passed':9,'cases':[{'case':name,'passed':True} for name in sorted(CASES)]},
+               'status':'passed','new_model_calls':0,'production_deployed':False,'historical_outcome_modified':False,'raw_prompt':'private'}
+        projected=project_cycle_assessment(value)
+        self.assertNotIn('raw_prompt',projected)
+        self.assertEqual(len(assessment_hash(projected)),64)
+        value['cycles_evaluator_sha256']='b'*64
+        with self.assertRaises(ValueError):
+            project_cycle_assessment(value)
     def test_old_frozen_suite_is_unchanged(self):
         path=Path(__file__).parent/'fixtures/provenance_evaluator.py'
         self.assertEqual(sha256(path.read_bytes()).hexdigest(),'f2c98b97dff5d4bd37dd826eb72d789b915f6497fa622b158b86a550b89d066a')
