@@ -36,6 +36,20 @@ def _transport(url: str, headers: dict[str, str]) -> bytes:
 
 
 class ItResearchPipelineTests(unittest.TestCase):
+    def test_targeted_arxiv_search_uses_literal_terms_not_recent_category_feed(self):
+        def targeted(url, headers):
+            if urlparse(url).hostname == "export.arxiv.org":
+                params = parse_qs(urlparse(url).query)
+                self.assertEqual(params["search_query"], ["all:agent AND (all:architecture OR all:orchestration)"])
+                self.assertEqual(params["sortBy"], ["relevance"])
+                return ARXIV
+            return _transport(url, headers)
+        run = run_it_research(ItResearchQuery("agent architecture", 2, ("agent", "architecture", "orchestration")), transport=targeted)
+        self.assertEqual(len(run.items), 4)
+        for terms in (("agent OR .env",), ["agent"], ("Agent",), ("a",) * 7):
+            with self.assertRaises(ItResearchError):
+                ItResearchQuery("agent architecture", 2, terms)
+
     def test_three_source_run_is_collected_but_cannot_yet_create_a_code_agent_task(self):
         run = run_it_research(ItResearchQuery("safe agent architecture", 2), transport=_transport)
         coverage = evaluate_coverage(classify_item(item) for item in run.items)

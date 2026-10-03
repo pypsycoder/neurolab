@@ -59,12 +59,17 @@ class ItResearchQuery:
 
     topic: str
     max_results_per_provider: int = 5
+    arxiv_topic_terms: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _TOPIC.fullmatch(self.topic.strip()):
             raise ItResearchError("topic must be a single line of 5 to 180 characters")
         if not 2 <= self.max_results_per_provider <= 10:
             raise ItResearchError("max results per provider must be between 2 and 10")
+        if (not isinstance(self.arxiv_topic_terms, tuple) or len(self.arxiv_topic_terms) > 6
+                or any(not isinstance(term, str) or not re.fullmatch(r"[a-z][a-z0-9-]{2,24}", term)
+                       for term in self.arxiv_topic_terms)):
+            raise ItResearchError("arXiv topic terms must be bounded literal tokens")
 
 
 @dataclass(frozen=True)
@@ -298,6 +303,12 @@ def search_arxiv(query: ItResearchQuery, transport: Transport = default_transpor
         "sortBy": "submittedDate",
         "sortOrder": "descending",
     }
+    if query.arxiv_topic_terms:
+        terms = query.arxiv_topic_terms
+        params["search_query"] = "all:" + terms[0]
+        if len(terms) > 1:
+            params["search_query"] += " AND (" + " OR ".join("all:" + t for t in terms[1:]) + ")"
+        params["sortBy"] = "relevance"
     payload = transport("https://export.arxiv.org/api/query?" + urlencode(params), {"User-Agent": "neurolab-it-research/0.1"})
     try:
         root = ElementTree.fromstring(payload)

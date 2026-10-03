@@ -122,6 +122,17 @@ Vision принимает только complete `finish_reason=stop`; отдел
 receipt сохраняет попытки, known usage и cleanup. Missing usage — unknown,
 не нулевая стоимость; extracted card остаётся needs_review до independent gate.
 
+R8 использует existing scholarly adapters и `corpus-gap-v1`, не новый агент.
+Одна invocation допускает максимум один reserved search (по 2 metadata records
+на provider), ни одного LLM call. Шаблон резервируется в PostgreSQL до сети;
+inflight/unavailable/completed не повторяются автоматически. После исчерпания
+шести шаблонов остановить discovery, разбирать очередь lawful fulltext либо
+версионировать новую search policy по измеренным пробелам, не стирать history.
+Не выводить truth/reproduction из title или provider count. Теория остаётся
+в balanced exploration lane; уже сохранённый PDF не скачивать снова только
+из-за needs_review card. Metadata coverage pass не является разрешением
+полного ТЗ: independent semantic/spec gate требуется отдельно.
+
 ### Формат записи
 
 Добавить или заполнить запись в разделе «Журнал выполнения» `ROADMAP.md`:

@@ -27,6 +27,7 @@ COPY --chown=researcher:researcher scripts/run_response_quality_shadow.py /app/s
 COPY --chown=researcher:researcher scripts/run_gigachat_response_quality_replay.py /app/scripts/run_gigachat_response_quality_replay.py
 COPY --chown=researcher:researcher scripts/run_semantic_response_holdout.py /app/scripts/run_semantic_response_holdout.py
 COPY --chown=researcher:researcher scripts/queue_arxiv_fulltext_preflight.py /app/scripts/queue_arxiv_fulltext_preflight.py
+COPY --chown=researcher:researcher scripts/run_corpus_gap_cycle.py /app/scripts/run_corpus_gap_cycle.py
 COPY --chown=researcher:researcher scripts/run_experimental_spec.py /app/scripts/run_experimental_spec.py
 COPY --chown=researcher:researcher scripts/run_structured_code_candidate.py /app/scripts/run_structured_code_candidate.py
 COPY --chown=researcher:researcher scripts/persist_code_outcome.py /app/scripts/persist_code_outcome.py
