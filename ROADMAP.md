@@ -363,6 +363,8 @@ diff». Артефакт должен быть повторяемым.
 
 ## 7. План восстановления и сборки полноценного исследовательского стека
 
+| 2026-10-03 | R7 — PostgreSQL restart/resume/cancel live | выполнен: foundation | Official PostgresSaver сохраняет receipt-only graph в `it_research`. Workflow `47d635db-3d41-485e-8f40-b8318dc6f899` остановлен после spec; новый процесс возобновил outcome/decision. Третий процесс вернул тот же terminal checkpoint `1f1befb4-b164-6d21-8003-14730ab3323a` без повторного исполнения. Workflow `916206f8-e6d2-4708-ad93-7e67b611c370` отменён до outcome. | Windows/RP5 170 tests OK / 3 skipped; shell failover/model-scope tests прошли. Все пять live graph invocations: new_model_calls=0, production_deployed=false. | Это не paid research orchestration и не reboot во время model call. Serializer strict, pickle disabled; PostgreSQL advisory lock сериализует только этот receipt workflow. | Добавить atomic provider-attempt reservations/shared model/token budget, paid-node idempotency/outbox и crash/cancel tests до scheduler; сейчас проверить final backup restore. |
+
 | 2026-10-03 | R6 — первый успешный model repair; R7 foundation | в работе | GigaChat-2-Pro сам исправил source: run `1c0c4597-6998-4cdd-8572-89e2490cf8d0`, hash `ec5890cb669d64944dd9eea27f7aedd4a07e92644b73d457e210c2e9ef19554b`. Независимый результат 11/11, Ruff clean; DB outcome и candidate solution asset persisted. Добавляется готовый LangGraph PostgresSaver 3.1.2 для receipt-only resume, без paid nodes. | Repair 996 prompt + 52 completion = 1048 tokens; self-score 0.9, independent 1.0. Frozen evaluator hash не изменился, включая 50-DAG holdout. | Полная цепочка первого tiny component пройдена с SDK fallback, general OpenHands no-op ещё не исправлен. Durable foundation не объявляется полным research graph/scheduler. | Проверить checkpoint между двумя процессами, terminal idempotency/cancel, backup/restore и feature-branch push. |
 
 | 2026-10-03 | R3 — отдельный scope для каждого ключа | в работе | Research wrappers и gateway теперь выбирают per-lane model/scope; SDK отклоняет unknown scope. Секреты по-прежнему только на RP5; текущие два personal account не переконфигурировались. | Offline shell test проверяет primary B2B/Max → secondary PERS/Pro без реальных ключей. Допустимые scopes сверены с официальной документацией GigaChat. | Ранее secondary могла наследовать неподходящий primary scope. Общий межworker budget/pause/checkpoint остаётся R7, не считается готовым этим фиксом. | Прогнать Windows/RP5 regression + shell tests, затем проверить backup/receipt snapshot и опубликовать feature branch. |
@@ -394,14 +396,16 @@ disposable БД (16 migrations); тестовая БД удалена, осно�
 Это локальный NVMe backup, не защита от повторного отказа всего накопителя:
 off-device копирование требует отдельно выбранного места хранения.
 
-**Следующий исполняемый подэтап R5:** strict GigaChat structured draft по
+**Пройденный подэтап R5:** strict GigaChat structured draft по
 receipt-backed `needs_review`/`reviewed` public cards; запрещены unknown refs,
 неанализированные страницы, production/clinical boundary и arbitrary task
 family. Разрешён bounded validated spec artifact согласно
 `docs/governance/EXPERIMENTAL_SPEC_POLICY.md`; raw prompt/transcript не хранится.
 Foundation tests прошли; live draft `95d8eda8-4fe3-4689-9bb1-d2913d95941a`
-сохранён в БД по новой text card. Следующий шаг — independent code gate,
-не выдавать этот tiny DAG за полноценное ТЗ всей архитектуры/clinical системы.
+сохранён в БД по новой text card. Independent code/repair gate также пройден:
+`1c0c4597-6998-4cdd-8572-89e2490cf8d0`, 11/11. Не выдавать этот tiny DAG за
+полноценное ТЗ всей архитектуры/clinical системы. Ближайший шаг R7 — shared
+budget/attempt recovery для реальных paid nodes, а не continuous scheduler.
 
 ### 7.1. Текущее фактическое состояние на 2026-10-03
 
@@ -419,7 +423,7 @@ Foundation tests прошли; live draft `95d8eda8-4fe3-4689-9bb1-d2913d95941a`
 | PDF и схемы | Новый legal 7-page PDF → 4 text windows → GigaChat card; dense text и quota/cleanup negative cases исправлены | Новый live Vision pass пока не выполнен; OCR отсутствует |
 | GigaChat | Two-lane failover/pause и true failure status, CLI imports и Compose routes исправлены; новое ТЗ и code repair реально выполнены | General tool bridge нестабилен; общий межworker model/token budget ещё не реализован |
 | Код-агент | Pinned ARM64 OpenHands/gpt2giga восстановлены; bounded SDK code → repair → frozen gate 11/11, без ручной правки candidate | General OpenHands пока дал no-op 0/11; tiny DAG не доказывает полноценного repository coding |
-| Диспетчер | LangGraph contracts; добавляется official PostgresSaver receipt-only resume/cancel | Paid research graph, shared budgets, attempt recovery и continuous scheduler ещё не приняты |
+| Диспетчер | Official PostgresSaver: live receipt-only restart/resume, terminal idempotency и cancel подтверждены | Paid research graph, shared budgets, attempt recovery и continuous scheduler ещё не приняты |
 | Оценка/память | Append-only code outcomes; один passing candidate asset, два измеренных failures; frozen 11-case gate с 50-DAG holdout | Semantic article/response judge и full evolution loop не готовы; sealed holdout остаётся verifier/protocol |
 
 Уточнение исторического журнала: статус «выполнен» в 2.46/2.53 означает

@@ -89,3 +89,24 @@ bounded validated spec, accepted candidate и machine receipts по policy.
 `neurolab-backup.timer` включён; backup/restore проверяется в отдельной
 disposable БД. Пока backup находится на том же NVMe: это не disk-failure
 recovery. Off-device backup и непрерывный autonomous scheduler ещё не приняты.
+
+## Durable receipt checkpoint (без model calls)
+
+`run_durable_reconciliation.sh` использует официальный PostgresSaver 3.1.2.
+`--setup` требуется только при первом создании checkpoint schema в
+`it_research`; его таблицы/миграции управляются upstream, отдельно от
+`schema_migrations` приложения. State содержит только bounded UUID/hash/
+metrics/decision. Pickle/arbitrary module deserialization запрещены.
+
+```bash
+sudo env RUN_DURABLE_RECONCILIATION=1 bash scripts/run_durable_reconciliation.sh \
+  --workflow-id <exact-workflow-uuid> --spec-run-id <exact-spec-uuid> \
+  --code-run-id <exact-code-uuid> --setup --stop-after-spec
+# В отдельном процессе: те же три UUID, но без --setup/--stop-after-spec.
+# Незавершённый workflow можно отменить через --cancel.
+```
+
+Это receipt reconciliation, не генерация нового code/search и не paid
+scheduler. Повтор terminal workflow ничего не вызывает/не переутверждает.
+Для нового эксперимента обязателен новый workflow UUID; произвольная подмена
+spec/code IDs для существующего checkpoint отклоняется.

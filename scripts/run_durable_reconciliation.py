@@ -25,7 +25,7 @@ def main():
     if args.cancel and args.stop_after_spec:
         raise ValueError('incompatible workflow actions')
     # Serializer only permits primitive state; no pickle or arbitrary imports.
-    serde=JsonPlusSerializer(pickle_fallback=False,allowed_msgpack_modules=[])
+    serde=JsonPlusSerializer(pickle_fallback=False,allowed_json_modules=[],allowed_msgpack_modules=[])
     with psycopg.connect(os.environ['DATABASE_URL'],autocommit=True,row_factory=dict_row,
         options='-c search_path=it_research,public -c statement_timeout=30000') as connection:
         connection.execute('SELECT pg_advisory_lock(hashtextextended(%s,0))',('neurolab-reconcile-v1:'+str(args.workflow_id),))
