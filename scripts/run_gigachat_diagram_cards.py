@@ -8,6 +8,7 @@ from io import BytesIO
 import json, os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, ValidationError
 from pypdf import PdfReader
 from gigachat.models import Chat, Messages
@@ -27,7 +28,7 @@ class _VisionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     diagram_kind: str; summary: str; components: list[str]; connections: list[str]; feedback_or_control: list[str]; limitations: list[str]
 
-def _vision(client: Any, prompt: str, image: bytes, page: int) -> str:
+def _vision(client: Any, prompt: str, image: bytes, page: int, *, metadata: dict[str, Any] | None = None) -> str:
     stream = BytesIO(image); stream.name = f"public-pdf-page-{page}.png"  # type: ignore[attr-defined]
     uploaded = None
     try:
@@ -38,10 +39,21 @@ def _vision(client: Any, prompt: str, image: bytes, page: int) -> str:
         request = Chat(
             messages=[Messages(role="user", content=prompt, attachments=[uploaded.id_])],
             temperature=0,
+            max_tokens=2048,
         )
+        if metadata is not None:
+            metadata["model_calls"] = 1
         response = client.chat(request)
+        if metadata is not None:
+            usage = getattr(response, "usage", None)
+            metadata["provider_tokens"] = {
+                name: count if type(count := getattr(usage, name, None)) is int and count >= 0 else None
+                for name in ("prompt_tokens", "completion_tokens", "total_tokens")
+            }
+        if not response.choices or response.choices[0].finish_reason != "stop":
+            raise DiagramCardError("Vision response is incomplete")
         content = response.choices[0].message.content
-        if not isinstance(content, str):
+        if not isinstance(content, str) or len(content.encode("utf-8")) > 24000:
             raise DiagramCardError("Vision response does not contain text JSON")
         candidate = content.strip()
         if candidate.startswith("```json\n") and candidate.endswith("\n```"):
@@ -62,6 +74,8 @@ def _vision(client: Any, prompt: str, image: bytes, page: int) -> str:
         if uploaded is not None:
             try:
                 client.delete_file(uploaded.id_)
+                if metadata is not None:
+                    metadata["temporary_upload_deleted"] = True
             except Exception:
                 raise TemporaryUploadCleanupError("temporary Vision upload could not be deleted") from None
 
@@ -81,19 +95,39 @@ def main() -> None:
     if not pages or len(pages) > 12 or any(not 1 <= page <= len(texts) for page in pages): raise RuntimeError("diagram page selection is outside the limit")
     results: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
-    with GigaChatClientFactory().create(GigaChatSettings.from_environment()) as client:
-        for page in dict.fromkeys(pages):
-            try:
-                image = render_page_png(response.payload, page_number=page)
-                card = parse_diagram_card(_vision(client, build_diagram_prompt(title=identity.title, page_number=page), image, page), source_key=identity.source_key, document_id=identity.document_id, document_sha256=identity.document_sha256, page_number=page, image_bytes=image)
-                results.append({"card_id": persist_diagram_card(database_url, card), "card": asdict(card), "card_sha256": card.card_sha256})
-            except (DiagramCardError, ValidationError):
-                # A malformed page/model response must not expose raw content
-                # or stop the remaining independently bounded candidates.
-                failures.append({"page_number": page, "status": "analysis_failed"})
-    if not results:
-        raise RuntimeError("no diagram cards could be created")
+    run_id = str(uuid4())
+    settings = GigaChatSettings.from_environment()
+    receipt: dict[str, Any] = {"run_id": run_id, "source_key": identity.source_key,
+        "document_id": identity.document_id, "document_sha256": identity.document_sha256,
+        "boundary": "public_synthetic_experimental_only", "status": "failed",
+        "model_label": settings.model, "attempts": [], "cards": [],
+        "production_deployed": False, "raw_content_retained": False}
+    try:
+        with GigaChatClientFactory().create(settings) as client:
+            for page in dict.fromkeys(pages):
+                attempt: dict[str, Any] = {"page_number": page, "model_calls": 0,
+                    "temporary_upload_deleted": None, "status": "failed"}
+                receipt["attempts"].append(attempt)
+                try:
+                    image = render_page_png(response.payload, page_number=page)
+                    card = parse_diagram_card(_vision(client, build_diagram_prompt(title=identity.title, page_number=page), image, page, metadata=attempt), source_key=identity.source_key, document_id=identity.document_id, document_sha256=identity.document_sha256, page_number=page, image_bytes=image)
+                    card_id = persist_diagram_card(database_url, card)
+                    results.append({"card_id": card_id, "card": asdict(card), "card_sha256": card.card_sha256})
+                    receipt["cards"].append({"card_id": card_id, "card_sha256": card.card_sha256, "page_number": page})
+                    attempt["status"] = "needs_review"
+                except (DiagramCardError, ValidationError):
+                    # Malformed content is recoverable; quota/cleanup/storage errors are not.
+                    failures.append({"page_number": page, "status": "analysis_failed"})
+        if not results:
+            raise RuntimeError("no diagram cards could be created")
+        receipt["status"] = "partial" if failures else "needs_review"
+    finally:
+        # Evidence of paid attempts survives failure; absent usage is unknown, not zero.
+        OUT.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path = OUT.parent / f"diagram-receipt-{run_id}.json"
+        receipt_path.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")
+        receipt_path.chmod(0o600)
     OUT.parent.mkdir(parents=True, exist_ok=True); OUT.write_text(json.dumps({"cards": results, "failures": failures}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"diagram_cards: needs_review; pages={len(results)}; failures={len(failures)}")
+    print(f"diagram_cards: needs_review; run_id={run_id}; pages={len(results)}; failures={len(failures)}")
 
 if __name__ == "__main__": run_redacted_cli(main, component="diagram_cards")
