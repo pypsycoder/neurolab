@@ -5,6 +5,7 @@ Never stores request bodies, prompts, model output or credentials.
 """
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import os
 
 
 def tool_reply(tools, step):
@@ -13,10 +14,14 @@ def tool_reply(tools, step):
     if editor is None:
         raise ValueError("expected official file editor tool")
     if step == 0:
-        return editor, {"command": "view", "path": "/workspace/experiment/probe.txt"}
-    if step == 1:
-        return editor, {"command": "str_replace", "path": "/workspace/experiment/probe.txt", "old_str": "before", "new_str": "after"}
-    return "finish", {"message": "Offline synthetic probe complete."}
+        action = {"command": "view", "path": "/workspace/experiment/probe.txt"}
+    elif step == 1:
+        action = {"command": "str_replace", "path": "/workspace/experiment/probe.txt", "old_str": "before", "new_str": "after"}
+    else:
+        return "finish", {"message": "Offline synthetic probe complete."}
+    if os.environ.get("TOOL_PROBE_OMIT_RISK") != "1":
+        action["security_risk"] = "LOW"
+    return editor, action
 
 
 class Handler(BaseHTTPRequestHandler):

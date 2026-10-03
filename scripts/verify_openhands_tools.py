@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in offline probe of the exact pinned OpenHands CLI and isolated mounts."""
 from hashlib import sha256
+import argparse
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,9 @@ from run_experimental_code import CLI_SHA, IMAGE, ROOT, command, require
 def main():
     if os.environ.get("RUN_OPENHANDS_TOOL_PROBE") != "1" or os.name != "posix" or os.geteuid() != 0:
         raise ValueError("opt-in root Docker coordinator required")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--negative-control", action="store_true", help="Missing security_risk must prevent editing.")
+    args = parser.parse_args()
     cli = ROOT / "runtime/openhands-eval/bin/openhands-1.16.0-linux-arm64"
     if sha256(cli.read_bytes()).hexdigest() != CLI_SHA:
         raise ValueError("pinned CLI checksum mismatch")
@@ -28,12 +32,13 @@ def main():
     probe = experiment / "probe.txt"; probe.write_text("before\n"); probe.chmod(0o600); os.chown(probe, 1000, 1000)
     receipt = {"run_id": run_id, "status": "failed", "agent": "OpenHands-CLI-1.16.0", "sdk": "1.21.0",
                "boundary": "offline_synthetic_tool_probe", "real_model_calls": 0, "credentials_mounted": False,
-               "raw_content_retained": False, "production_deployed": False}
+               "raw_content_retained": False, "production_deployed": False, "negative_control": args.negative_control}
     security = ["--read-only", "--log-driver", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "64", "--cpus", "2"]
     try:
         require(["docker", "network", "create", "--internal", network])
         require(["docker", "run", "--rm", "-d", "--name", server, "--network", network, "--network-alias", "tool-fixture",
                  *security, "--memory", "128m", "--user", "1000:1000", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+                 "-e", f"TOOL_PROBE_OMIT_RISK={int(args.negative_control)}",
                  "-v", f"{ROOT / 'tests/fixtures/openhands_tool_server.py'}:/fixture.py:ro", "--entrypoint", "/usr/local/bin/python", IMAGE, "-B", "/fixture.py"])
         time.sleep(1)
         # Same read-only parent + writable experiment layout as the code runner.
@@ -56,7 +61,8 @@ def main():
             "--task", "Offline tool protocol probe. Edit only /workspace/experiment/probe.txt: replace before with after, then finish."], timeout=180, events=events)
         command(["docker", "rm", "-f", agent])
         receipt.update(agent_exit_code=code, agent_event_counts=events, file_changed=probe.read_text() == "after\n")
-        if code == 0 and receipt["file_changed"]:
+        expected = (not receipt["file_changed"] and events.get("missing_security_risk", 0) == 2) if args.negative_control else receipt["file_changed"]
+        if code == 0 and expected:
             receipt["status"] = "passed"
     finally:
         for name in (agent, server):

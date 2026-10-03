@@ -28,6 +28,8 @@ def observe_line(line: bytes, counts: dict[str,int]) -> None:
     if isinstance(tool,str) and tool in TOOLS:
         counts['tool:'+tool] = min(1000,counts.get('tool:'+tool,0)+1)
     action = value.get('action')
+    if kind == 'ActionEvent' and action is None:
+        counts['non_executable_action'] = min(1000,counts.get('non_executable_action',0)+1)
     if isinstance(action,dict) and isinstance(action.get('command'),str) and action['command'] in EDITOR_COMMANDS:
         label = 'editor:'+action['command']
         counts[label] = min(1000,counts.get(label,0)+1)
@@ -39,4 +41,17 @@ def observe_line(line: bytes, counts: dict[str,int]) -> None:
                          (b'old_str','replacement_operation')):
         if kind == 'ObservationEvent' and phrase in line:
             counts[label] = min(1000,counts.get(label,0)+1)
+    if kind == 'AgentErrorEvent':
+        error = value.get('error')
+        if isinstance(error,str):
+            for phrase,label in (('validation error','action_schema_validation'),('Invalid JSON','invalid_action_json'),
+                                 ('Error validating tool','action_validation_failed'),('Cannot infer','action_command_inference_failed'),
+                                 ('unparseable JSON','invalid_action_json'),('must be a JSON object','action_not_object'),
+                                 ('not found','tool_not_found'),('not registered','tool_not_registered'),
+                                 ('Field required','action_missing_field'),('Extra inputs','action_extra_field'),
+                                 ('unexpected keyword','tool_argument_mismatch'),('Permission denied','tool_permission_denied')):
+                if phrase in error:
+                    counts[label] = min(1000,counts.get(label,0)+1)
+            if 'Failed to provide security_risk field' in error:
+                counts['missing_security_risk'] = min(1000,counts.get('missing_security_risk',0)+1)
 

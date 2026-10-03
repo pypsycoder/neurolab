@@ -8,7 +8,20 @@ class AgentMetadataTests(unittest.TestCase):
         counts = {}
         observe_line(json.dumps({'kind':'ActionEvent','tool_name':'terminal','command':'private prompt','content':'secret token'}).encode(),counts)
         observe_line(json.dumps({'kind':'secret credential','tool_name':'unknown private tool'}).encode(),counts)
-        self.assertEqual(counts,{'json_events':2,'ActionEvent':1,'tool:terminal':1})
+        self.assertEqual(counts,{'json_events':2,'ActionEvent':1,'tool:terminal':1,'non_executable_action':1})
+        self.assertNotIn('private',json.dumps(counts))
+
+    def test_required_risk_failure_has_fixed_label(self):
+        counts = {}
+        observe_line(json.dumps({'kind':'AgentErrorEvent','error':"Error validating tool: Failed to provide security_risk field; private"}).encode(),counts)
+        self.assertEqual(counts['missing_security_risk'],1)
+        self.assertNotIn('private',json.dumps(counts))
+
+    def test_schema_error_classification_does_not_keep_error_text(self):
+        counts = {}
+        observe_line(json.dumps({'kind':'AgentErrorEvent','error':'1 validation error: Field required; private input'}).encode(),counts)
+        self.assertEqual(counts['action_schema_validation'],1)
+        self.assertEqual(counts['action_missing_field'],1)
         self.assertNotIn('private',json.dumps(counts))
 
     def test_error_marker_and_huge_event_are_bounded(self):
