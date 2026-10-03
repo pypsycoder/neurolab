@@ -9,6 +9,10 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
+
+from gigachat import GigaChat
+from gigachat.models import Chat, Messages, JsonSchemaResponseFormat
 
 from pydantic import BaseModel, ConfigDict
 
@@ -19,7 +23,9 @@ from neurolab.document_cards import (
     parse_window_note,
     plan_page_windows,
 )
-from neurolab.gigachat_retry import GigaChatRetryError, bounded_gigachat_call, run_redacted_cli
+from neurolab.gigachat_retry import is_transient_gigachat_error, run_redacted_cli
+from neurolab.document_analysis_cache import run_cached_step, step_key, AnalysisOutcomeUnknown
+from neurolab.document_cards import DocumentCardError
 from neurolab.fulltext_verification import OpenAccessPdfRequest, extract_open_access_pdf, default_pdf_transport
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.research_storage import load_document_identity, persist_document_card
@@ -67,18 +73,22 @@ class _CardResponse(BaseModel):
     uncertainty: Literal["low", "medium", "high", "unknown"]
 
 
-def _ask(client: Any, prompt: str, response_format: type[BaseModel], *, max_retries: int) -> str:
-    """Use the SDK JSON-schema mode, then revalidate with the local contract."""
-    try:
-        _, response = bounded_gigachat_call(
-            lambda: client.chat_parse(prompt, response_format=response_format, strict=True),
-            max_retries=max_retries,
-        )
-        return response.model_dump_json()
-    except GigaChatRetryError:
-        raise
-    except Exception:
-        raise RuntimeError("GigaChat structured document-card request failed") from None
+def _ask(client: Any, prompt: str, response_format: type[BaseModel], *, metadata: dict) -> str:
+    """Official structured Chat, capturing usage before local parsing can fail."""
+    request = Chat(messages=[Messages(role="user", content=prompt)], temperature=0,
+                   max_tokens=2048 if response_format is _WindowResponse else 4096,
+                   response_format=JsonSchemaResponseFormat(schema=response_format, strict=True))
+    response = client.chat(request)
+    usage = getattr(response, "usage", None)
+    metadata["provider_tokens"] = {
+        name: n if type(n := getattr(usage, name, None)) is int and n >= 0 else None
+        for name in ("prompt_tokens", "completion_tokens", "total_tokens")}
+    if not response.choices or response.choices[0].finish_reason != "stop":
+        raise DocumentCardError("document response is incomplete")
+    raw = response.choices[0].message.content
+    if not isinstance(raw, str) or len(raw.encode()) > 48000:
+        raise DocumentCardError("document response outside boundary")
+    return response_format.model_validate_json(raw).model_dump_json()
 
 
 def main() -> None:
@@ -87,7 +97,9 @@ def main() -> None:
     parser.add_argument("--document-id", required=True)
     parser.add_argument("--arxiv-id", required=True)
     parser.add_argument("--pages-per-window", type=int, default=2)
-    parser.add_argument("--max-rate-limit-retries", type=int, default=2)
+    parser.add_argument("--max-rate-limit-retries", type=int, choices=[0], default=0,
+                        help="Retries belong to the two-lane wrapper; no hidden per-window retries.")
+    parser.add_argument("--plan-only", action="store_true", help="Extract/plan without credentials or model calls.")
     parser.add_argument("--persist", action="store_true", help="Store only the bounded card using DATABASE_URL.")
     arguments = parser.parse_args()
 
@@ -104,45 +116,63 @@ def main() -> None:
     if receipt.sha256 != identity.document_sha256 or receipt.page_count != identity.page_count:
         raise RuntimeError("retrieved PDF does not match the stored document receipt")
     windows = plan_page_windows(page_texts, pages_per_window=arguments.pages_per_window)
+    run_id = str(uuid4())
+    audit = {"run_id": run_id, "version": "document-analysis-v2", "source_key": identity.source_key,
+             "document_id": identity.document_id, "document_sha256": identity.document_sha256,
+             "page_count": receipt.page_count, "window_count": len(windows),
+             "empty_text_pages": [i for i, text in enumerate(page_texts, 1) if not text.strip()],
+             "planned_max_model_calls": len(windows) + 1, "status": "planned", "attempts": [],
+             "raw_content_retained": False, "production_deployed": False}
+    if arguments.plan_only:
+        print(json.dumps(audit, sort_keys=True))
+        return
 
     settings = GigaChatSettings.from_environment()
-    with GigaChatClientFactory().create(settings) as client:
-        notes = tuple(
-            parse_window_note(
-                _ask(
-                    client,
-                    build_window_prompt(title=identity.title, window=window),
-                    _WindowResponse,
-                    max_retries=arguments.max_rate_limit_retries,
-                ),
-                window=window,
-            )
-            for window in windows
-        )
-        card = parse_document_card(
-                _ask(
-                    client,
-                    build_card_prompt(title=identity.title, page_count=receipt.page_count, notes=notes),
-                    _CardResponse,
-                    max_retries=arguments.max_rate_limit_retries,
-                ),
-            source_key=identity.source_key,
-            document_id=identity.document_id,
-            document_sha256=receipt.sha256,
-            page_count=receipt.page_count,
-        )
-
-    result: dict[str, object] = {
-        "card": asdict(card),
-        "card_sha256": card.card_sha256,
-        "model_calls": len(windows) + 1,
-        "page_windows": [{"page_start": item.page_start, "page_end": item.page_end} for item in windows],
-    }
-    if arguments.persist:
-        result["card_id"] = persist_document_card(database_url, card)
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"document_card: needs_review; windows={len(windows)}")
+    audit.update(model_label=settings.model, status="failed")
+    def step(prompt, schema, validator, *, kind, start=None, end=None):
+        metadata = {"kind": kind, "page_start": start, "page_end": end,
+                    "new_model_calls": 0, "status": "failed"}
+        audit["attempts"].append(metadata)
+        key = step_key(document_sha256=receipt.sha256, model_label=settings.model, prompt=prompt)
+        metadata["step_key"] = key
+        return run_cached_step(OUTPUT_PATH.parent / "document-analysis-cache", key, metadata,
+                               lambda: _ask(client, prompt, schema, metadata=metadata), validator)
+    try:
+        # Disable SDK retries, so each audited invocation is one generation attempt.
+        factory = GigaChatClientFactory(constructor=lambda **kw: GigaChat(max_retries=0, **kw))
+        with factory.create(settings) as client:
+            notes = tuple(step(build_window_prompt(title=identity.title, window=w), _WindowResponse,
+                               lambda raw, w=w: parse_window_note(raw, window=w),
+                               kind="window", start=w.page_start, end=w.page_end) for w in windows)
+            card = step(build_card_prompt(title=identity.title, page_count=receipt.page_count, notes=notes),
+                        _CardResponse, lambda raw: parse_document_card(raw, source_key=identity.source_key,
+                            document_id=identity.document_id, document_sha256=receipt.sha256,
+                            page_count=receipt.page_count), kind="synthesis")
+        # A finding must belong to analysed windows, not just fall within PDF length.
+        covered = {p for w in windows for p in range(w.page_start, w.page_end + 1)}
+        if any(not set(range(f.page_start, f.page_end + 1)) <= covered for f in card.findings):
+            raise DocumentCardError("finding outside analysed windows")
+        result = {"run_id": run_id, "card": asdict(card), "card_sha256": card.card_sha256,
+                  "model_calls": sum(a["new_model_calls"] for a in audit["attempts"]),
+                  "page_windows": [{"page_start": w.page_start, "page_end": w.page_end} for w in windows]}
+        if arguments.persist:
+            result["card_id"] = persist_document_card(database_url, card)
+            audit["card_id"] = result["card_id"]
+        audit.update(status="needs_review", card_sha256=card.card_sha256)
+        OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        OUTPUT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception as error:
+        # Only definite quota refusals may trigger wrapper failover and reuse.
+        # Timeouts/unknown provider execution stay closed, never blind replay.
+        if is_transient_gigachat_error(error) and audit["attempts"] and audit["attempts"][-1]["status"] != "quota_refused":
+            raise AnalysisOutcomeUnknown("provider outcome unknown; automatic repeat blocked") from None
+        raise
+    finally:
+        OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        path = OUTPUT_PATH.parent / f"document-receipt-{run_id}.json"
+        path.write_text(json.dumps(audit, sort_keys=True) + "\n", encoding="utf-8")
+        path.chmod(0o600)
+    print(f"document_card: needs_review; run_id={run_id}; windows={len(windows)}; new_model_calls={result['model_calls']}")
 
 
 if __name__ == "__main__":

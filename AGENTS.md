@@ -138,6 +138,18 @@ PDF preflight также резервирует один corpus source до lice
 не повторяется автоматически, source остаётся metadata; successful document
 receipt ещё не означает verified claims или разрешение на полный ТЗ.
 
+Document-analysis-v2 разрешает bounded validated intermediate WindowNote/card
+cache в ignored runtime (0600, до 48 KiB на step) только для возобновления
+того же exact PDF/model/prompt-version. Cache не содержит PDF, извлечённый
+текст, prompt или raw reply. Hash и strict schema повторно проверяются перед
+reuse. Step резервируется exact-key lock до generation; stale lock/inflight,
+timeout/unknown и invalid output блокируют автоматический повтор. Definite
+429 допускает максимум вторую попытку; completed step не вызывает модель.
+Каждый run сохраняет redacted attempts/known usage даже при отказе; SDK retry
+disabled, finish_reason=stop обязателен. Cache не является account-wide budget
+или полноценным R7 orchestration. Новая card остаётся needs_review; структурный
+assessment не является semantic verification или reproduction.
+
 ### Формат записи
 
 Добавить или заполнить запись в разделе «Журнал выполнения» `ROADMAP.md`:
