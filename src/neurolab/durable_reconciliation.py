@@ -3,9 +3,10 @@ from typing import TypedDict
 from uuid import UUID
 import re
 from langgraph.graph import StateGraph, START, END
+from neurolab.code_cycle_gate import validate_cycle_result
 
 BOUNDARY='public_synthetic_experimental_only'
-GRAPH_VERSION='receipt-reconcile-v1'
+GRAPH_VERSION='receipt-reconcile-v2'
 
 
 class ReconciliationState(TypedDict, total=False):
@@ -18,6 +19,7 @@ class ReconciliationState(TypedDict, total=False):
     decision: str
     independent_passed: int
     independent_total: int
+    cycles_passed: int | None
     production_deployed: bool
 
 
@@ -46,11 +48,19 @@ def build_reconciliation_graph(checkpointer, load_spec, load_outcome, *, stop_af
             raise ValueError('outcome decision invalid')
         if row['decision']=='harvest_parts' and passed!=total:
             raise ValueError('failed candidate cannot be harvested')
+        cycles = row.get('cycles_evaluation')
+        cycles_passed = validate_cycle_result(cycles)[0] if cycles is not None else None
+        decision = row['decision']
+        if decision == 'harvest_parts':
+            if cycles_passed is None:
+                decision = 'continue'  # Legacy result needs the new independent gate, not code promotion.
+            elif cycles_passed != 9:
+                raise ValueError('failed cycle gate cannot be harvested')
         return {'outcome_sha256':digest(row['outcome_sha256']),'independent_passed':passed,
-            'independent_total':total,'decision':row['decision'],'production_deployed':False,'phase':'outcome_checked'}
+            'independent_total':total,'cycles_passed':cycles_passed,'decision':decision,'production_deployed':False,'phase':'outcome_checked'}
 
     def decision_node(state):
-        if state['decision'] not in {'repair','harvest_parts'}:
+        if state['decision'] not in {'repair','harvest_parts','continue'}:
             raise ValueError('unsupported decision')
         return {'phase':'complete'}
 
@@ -84,4 +94,4 @@ def run_or_resume(graph, workflow_id, spec_id, code_id, *, cancel=False):
         'phase':values['phase'],'decision':values.get('decision'),'pending_nodes':list(final.next),
         'checkpoint_id':final.config['configurable']['checkpoint_id'],'reused_checkpoint':reused,
         'new_model_calls':0,'production_deployed':False,'independent_passed':values.get('independent_passed'),
-        'independent_total':values.get('independent_total')}
+        'independent_total':values.get('independent_total'),'cycles_passed':values.get('cycles_passed')}
