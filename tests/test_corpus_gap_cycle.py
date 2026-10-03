@@ -21,7 +21,7 @@ class CorpusGapCycleTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.module.__file__ = str(Path(self.temp.name) / "scripts/run_corpus_gap_cycle.py")
         self.initial, self.reserve, self.finish = (MagicMock() for _ in range(3))
-        self.initial.execute.side_effect = [[], []]
+        self.initial.execute.side_effect = [[], [], []]
         self.reserve.execute.return_value.fetchone.return_value = ("reserved",)
         self.connections = []
         for conn in (self.initial, self.reserve, self.finish):
@@ -86,7 +86,7 @@ class CorpusGapCycleTests(unittest.TestCase):
         self.finish.execute.assert_not_called()
 
     def test_exhausted_catalog_calls_no_provider(self):
-        self.initial.execute.side_effect = [[(t.template_id,) for t in SEARCH_TEMPLATES], []]
+        self.initial.execute.side_effect = [[(t.template_id,) for t in SEARCH_TEMPLATES], [], []]
         output, search, persist = self.invoke()
         search.assert_not_called()
         self.reserve.execute.assert_not_called()

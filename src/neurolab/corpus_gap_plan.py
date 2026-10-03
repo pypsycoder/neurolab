@@ -6,6 +6,7 @@ never commands. Discovery provenance is not independent scientific replication.
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
+import re
 
 from neurolab.fulltext_candidate_queue import build_fulltext_preflight_queue
 from neurolab.research_corpus import SourceAssessment, CoveragePolicy, evaluate_coverage
@@ -45,6 +46,7 @@ def corpus_fingerprint(assessments: tuple[SourceAssessment, ...]) -> str:
 def plan_corpus_gaps(
     assessments: tuple[SourceAssessment, ...], *, attempted_templates: tuple[str, ...] = (),
     document_source_keys: frozenset[str] = frozenset(), fulltext_limit: int = 6,
+    attempted_fulltext_source_keys: frozenset[str] = frozenset(),
     policy: CoveragePolicy = CoveragePolicy(),
 ) -> dict[str, object]:
     """One search at most; no model call, status promotion, or executable task."""
@@ -52,6 +54,8 @@ def plan_corpus_gaps(
         raise ValueError("unknown search template history")
     if type(fulltext_limit) is not int or not 1 <= fulltext_limit <= 20:
         raise ValueError("fulltext limit outside boundary")
+    if any(not re.fullmatch(r"[0-9a-f]{64}", key) for key in attempted_fulltext_source_keys):
+        raise ValueError("invalid fulltext attempt history")
     coverage = evaluate_coverage(assessments, policy=policy)
     deficits = {layer: max(0, policy.minimum_sources_per_layer - coverage.sources_per_layer[layer])
                 for layer in LAYERS}
@@ -63,7 +67,8 @@ def plan_corpus_gaps(
     next_search = asdict(available[0]) if available else None
 
     # Do not re-download a document just because its model card is unreviewed.
-    pending = tuple(a for a in assessments if a.source_key not in document_source_keys)
+    pending = tuple(a for a in assessments if a.source_key not in document_source_keys
+                    and a.source_key not in attempted_fulltext_source_keys)
     # Build each layer shortlist separately: a global/theory item must not be
     # lost to the top-20 practical utility cut before balancing even begins.
     by_key = {}
@@ -104,6 +109,7 @@ def plan_corpus_gaps(
         "corpus_sha256": corpus_fingerprint(assessments),
         "coverage": asdict(coverage), "metadata_layer_deficits": deficits,
         "document_source_count": len(document_source_keys),
+        "fulltext_attempted_source_count": len(attempted_fulltext_source_keys),
         "blocking_gaps": gaps, "full_spec_allowed": False,
         "next_search": next_search, "remaining_search_templates": len(available),
         "fulltext_candidates": [c.as_json_value() for c in selected],

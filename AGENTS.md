@@ -110,7 +110,7 @@ Serializer strict, pickle запрещён. Resume завершённых шаг
 модель повторно. Этот foundation не выдавать за полный paid search/code
 orchestrator: shared budgets/outbox/provider attempt recovery ещё обязательны.
 
-Если владелец отложил выбор нового бюджета, продолжать независимые R4/R6
+Если владелец отложил выбор нового бюджета, продолжать независимые R4/R6/R8
 проверки с существующими лимитами, а не включать continuous paid graph.
 Перед повторным live OpenHands запуском после no-op проверять pinned CLI
 через offline tool replay и negative control. `exit 0` не доказывает запись
@@ -132,6 +132,11 @@ inflight/unavailable/completed не повторяются автоматиче�
 в balanced exploration lane; уже сохранённый PDF не скачивать снова только
 из-за needs_review card. Metadata coverage pass не является разрешением
 полного ТЗ: independent semantic/spec gate требуется отдельно.
+PDF preflight также резервирует один corpus source до license request;
+без compatible explicit licence PDF не скачивается. Неясный license/network
+отказ не выдавать за доказательство copyright ban. Failed/inflight preflight
+не повторяется автоматически, source остаётся metadata; successful document
+receipt ещё не означает verified claims или разрешение на полный ТЗ.
 
 ### Формат записи
 

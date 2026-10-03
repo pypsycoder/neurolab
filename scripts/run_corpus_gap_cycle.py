@@ -25,13 +25,17 @@ def main():
             "SELECT template_id FROM it_research.corpus_gap_rounds WHERE policy_version=%s", (VERSION,)))
         documents = frozenset(row[0] for row in connection.execute(
             "SELECT DISTINCT source_key FROM it_research.documents"))
+        attempted_fulltext = frozenset(row[0] for row in connection.execute(
+            "SELECT source_key FROM it_research.corpus_fulltext_attempts WHERE policy_version=%s", (VERSION,)))
     before = load_corpus_assessments(database_url)
-    plan = plan_corpus_gaps(before, attempted_templates=attempted, document_source_keys=documents)
+    plan = plan_corpus_gaps(before, attempted_templates=attempted, document_source_keys=documents,
+                           attempted_fulltext_source_keys=attempted_fulltext)
     run_id = str(uuid4())
     receipt = {"run_id": run_id, "checked_at": datetime.now(UTC).isoformat(),
                "status": "planned", "before": plan, "new_model_calls": 0}
     if args.execute and plan["next_search"]:
         template = plan["next_search"]
+        receipt["status"] = "inflight"
         # Reservation commits BEFORE any network request; parallel invocations
         # or a process crash cannot silently repeat this template.
         with psycopg.connect(database_url) as connection:
@@ -53,7 +57,7 @@ def main():
                            new_unique_sources=max(0, evaluate_coverage(after).unique_source_count -
                                                   evaluate_coverage(before).unique_source_count),
                            after=plan_corpus_gaps(after, attempted_templates=attempted + (template["template_id"],),
-                                                 document_source_keys=documents))
+                                                 document_source_keys=documents, attempted_fulltext_source_keys=attempted_fulltext))
             record_synthesis_status(database_url, evaluate_coverage(after),
                                     artifact_ref=f"runtime/it-research/corpus-gap-{run_id}.json")
         except ItResearchError:
