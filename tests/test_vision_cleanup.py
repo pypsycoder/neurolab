@@ -27,7 +27,7 @@ class Client:
         self.requests.append(args[0])
         if self.chat_error:
             raise self.chat_error
-        return SimpleNamespace(choices=[SimpleNamespace(finish_reason=self.finish_reason, message=SimpleNamespace(content=self.content))])
+        return SimpleNamespace(usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30), choices=[SimpleNamespace(finish_reason=self.finish_reason, message=SimpleNamespace(content=self.content))])
 
     def delete_file(self, file_id):
         self.deleted.append(file_id)
@@ -48,11 +48,13 @@ class VisionCleanupTests(unittest.TestCase):
     def test_native_attachment_and_output_limit_are_preserved(self):
         raw = json.dumps(dict(diagram_kind="other", summary="Synthetic diagram", components="Component", connections=[], feedback_or_control=[], limitations=[]))
         client = Client(content=raw)
-        parsed = json.loads(vision._vision(client, "synthetic", b"image", 1))
+        metadata = {}
+        parsed = json.loads(vision._vision(client, "synthetic", b"image", 1, metadata=metadata))
         self.assertEqual(parsed["components"], ["Component"])
         self.assertEqual(client.requests[0].max_tokens, 2048)
         self.assertEqual(client.requests[0].messages[0].attachments, ["ephemeral-upload"])
         self.assertEqual(client.deleted, ["ephemeral-upload"])
+        self.assertEqual(metadata["provider_tokens"], {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30})
 
     def test_oversized_response_is_rejected_and_upload_deleted(self):
         client = Client(content="x" * 24001)
