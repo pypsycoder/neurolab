@@ -14,7 +14,7 @@ from uuid import uuid4
 from gigachat import GigaChat
 from gigachat.models import Chat, Messages, JsonSchemaResponseFormat
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from neurolab.document_cards import (
     build_card_prompt,
@@ -31,6 +31,7 @@ from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.research_storage import load_document_identity, persist_document_card
 from neurolab.task_document_cards import (
     condition_prompt, require_task_selection, task_context, validate_task_note, validate_task_card,
+    serialize_task_card,
 )
 from neurolab.task_document_storage import persist_task_card
 from neurolab.research_selection import MISSIONS
@@ -78,6 +79,32 @@ class _CardResponse(BaseModel):
     uncertainty: Literal["low", "medium", "high", "unknown"]
 
 
+class _TaskFindingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    page_start: int
+    page_end: int
+    kind: Literal["architecture", "method", "implementation", "evaluation", "limitation"]
+    source_statement: str = Field(min_length=20, max_length=400)
+    task_application: str = Field(min_length=20, max_length=400)
+    missing_details: str = Field(min_length=20, max_length=400)
+
+
+class _TaskCardResponse(_CardResponse):
+    findings: list[_TaskFindingResponse]
+    reproducibility: None
+    source_independence: None
+
+
+def _parse_task_card(raw, *, identity, receipt):
+    value = _TaskCardResponse.model_validate_json(raw).model_dump(mode="json")
+    value["findings"] = [{"page_start": f["page_start"], "page_end": f["page_end"], "kind": f["kind"],
+        "summary": f"В статье: {f['source_statement'].strip()} Применение: {f['task_application'].strip()} Пробел: {f['missing_details'].strip()}"}
+        for f in value["findings"]]
+    parsed = parse_document_card(json.dumps(value, ensure_ascii=False), source_key=identity.source_key,
+        document_id=identity.document_id, document_sha256=receipt.sha256, page_count=receipt.page_count)
+    return validate_task_card(parsed)
+
+
 def _ask(client: Any, prompt: str, response_format: type[BaseModel], *, metadata: dict) -> str:
     """Official structured Chat, capturing usage before local parsing can fail."""
     request = Chat(messages=[Messages(role="user", content=prompt)], temperature=0,
@@ -89,11 +116,17 @@ def _ask(client: Any, prompt: str, response_format: type[BaseModel], *, metadata
         name: n if type(n := getattr(usage, name, None)) is int and n >= 0 else None
         for name in ("prompt_tokens", "completion_tokens", "total_tokens")}
     if not response.choices or response.choices[0].finish_reason != "stop":
+        metadata["failure_code"] = "incomplete_response"
         raise DocumentCardError("document response is incomplete")
     raw = response.choices[0].message.content
     if not isinstance(raw, str) or len(raw.encode()) > 48000:
+        metadata["failure_code"] = "response_boundary"
         raise DocumentCardError("document response outside boundary")
-    return response_format.model_validate_json(raw).model_dump_json()
+    try:
+        return response_format.model_validate_json(raw).model_dump_json()
+    except ValidationError:
+        metadata["failure_code"] = "response_schema"
+        raise DocumentCardError("document response schema invalid") from None
 
 
 def main() -> None:
@@ -104,11 +137,15 @@ def main() -> None:
     parser.add_argument("--pages-per-window", type=int, default=2)
     parser.add_argument("--mission", choices=[m.mission_id for m in MISSIONS],
                         help="Разбор под одну допущенную задачу; отдельная карточка, только сравнительный режим.")
+    parser.add_argument("--reuse-windows-only", action="store_true",
+                        help="Только готовые окна; новые вызовы для текста запрещены. Максимум один новый синтез.")
     parser.add_argument("--max-rate-limit-retries", type=int, choices=[0], default=0,
                         help="Retries belong to the two-lane wrapper; no hidden per-window retries.")
     parser.add_argument("--plan-only", action="store_true", help="Extract/plan without credentials or model calls.")
     parser.add_argument("--persist", action="store_true", help="Store only the bounded card using DATABASE_URL.")
     arguments = parser.parse_args()
+    if arguments.reuse_windows_only and not arguments.mission:
+        raise DocumentCardError("cached windows only requires a trusted task")
 
     database_url = os.environ.get("DATABASE_URL", "")
     from neurolab.selection_storage import require_metadata_selection, persist_selection
@@ -138,7 +175,10 @@ def main() -> None:
              "raw_content_retained": False, "production_deployed": False}
     if arguments.mission:
         audit.update(analysis_mode="task_conditioned_shadow", task_context=task_context(arguments.mission),
-                     semantic_verification="not_performed", full_spec_allowed=False)
+                     semantic_verification="not_performed", full_spec_allowed=False,
+                     synthesis_contract="task-synthesis-v2")
+    if arguments.reuse_windows_only:
+        audit.update(reuse_windows_only=True, planned_max_new_model_calls=1)
     if arguments.plan_only:
         print(json.dumps(audit, sort_keys=True))
         return
@@ -152,8 +192,24 @@ def main() -> None:
         key = step_key(document_sha256=receipt.sha256, model_label=settings.model, prompt=prompt)
         metadata["step_key"] = key
         directory = "task-document-analysis-cache" if arguments.mission else "document-analysis-cache"
+        def ask_step():
+            if arguments.reuse_windows_only and kind == "window":
+                raise DocumentCardError("new window call forbidden")
+            return _ask(client, prompt, schema, metadata=metadata)
+        def validate_with_diagnostics(raw):
+            try:
+                return validator(raw)
+            except Exception as error:
+                codes = {"Russian explanatory prose required": "russian_prose",
+                         "task finding sections required": "finding_sections",
+                         "task finding section too vague": "finding_detail",
+                         "independent evidence must remain unknown": "independent_score_claim"}
+                metadata["failure_code"] = (codes.get(str(error), "validator_contract")
+                                            if isinstance(error, DocumentCardError) else "validator_contract")
+                raise
         return run_cached_step(OUTPUT_PATH.parent / directory, key, metadata,
-                               lambda: _ask(client, prompt, schema, metadata=metadata), validator)
+                               ask_step, validate_with_diagnostics,
+                               serialize=serialize_task_card if arguments.mission and kind == "synthesis" else None)
     def prompt_for_task(prompt, *, synthesis=False):
         return condition_prompt(prompt, arguments.mission, synthesis=synthesis) if arguments.mission else prompt
 
@@ -162,10 +218,30 @@ def main() -> None:
         return validate_task_note(note) if arguments.mission else note
 
     def parse_card(raw):
+        if arguments.mission:
+            return _parse_task_card(raw, identity=identity, receipt=receipt)
         parsed = parse_document_card(raw, source_key=identity.source_key,
             document_id=identity.document_id, document_sha256=receipt.sha256, page_count=receipt.page_count)
-        return validate_task_card(parsed) if arguments.mission else parsed
+        return parsed
     try:
+        if arguments.reuse_windows_only:
+            from neurolab.document_analysis_cache import canonical, VERSION as CACHE_VERSION
+            for w in windows:
+                key = step_key(document_sha256=receipt.sha256, model_label=settings.model,
+                    prompt=prompt_for_task(build_window_prompt(title=identity.title, window=w)))
+                path = OUTPUT_PATH.parent / "task-document-analysis-cache" / f"{key}.json"
+                if path.is_symlink() or not path.is_file() or path.stat().st_size > 60000:
+                    raise DocumentCardError("required completed window unavailable")
+                value = json.loads(path.read_text(encoding="utf-8"))
+                if (set(value) != {"version", "step_key", "status", "requests", "validated_output", "output_sha256"}
+                        or value["version"] != CACHE_VERSION or value["step_key"] != key
+                        or value["status"] != "completed"):
+                    raise DocumentCardError("required completed window unavailable")
+                from hashlib import sha256
+                raw = canonical(value["validated_output"])
+                if sha256(raw.encode()).hexdigest() != value["output_sha256"]:
+                    raise DocumentCardError("required completed window corrupted")
+                parse_note(raw, w)
         # Disable SDK retries, so each audited invocation is one generation attempt.
         factory = GigaChatClientFactory(constructor=lambda **kw: GigaChat(max_retries=0, **kw))
         with factory.create(settings) as client:
@@ -173,7 +249,8 @@ def main() -> None:
                                lambda raw, w=w: parse_note(raw, w),
                                kind="window", start=w.page_start, end=w.page_end) for w in windows)
             card = step(prompt_for_task(build_card_prompt(title=identity.title, page_count=receipt.page_count, notes=notes),
-                                        synthesis=True), _CardResponse, parse_card, kind="synthesis")
+                                        synthesis=True), _TaskCardResponse if arguments.mission else _CardResponse,
+                        parse_card, kind="synthesis")
         # A finding must belong to analysed windows, not just fall within PDF length.
         covered = {p for w in windows for p in range(w.page_start, w.page_end + 1)}
         if any(not set(range(f.page_start, f.page_end + 1)) <= covered for f in card.findings):

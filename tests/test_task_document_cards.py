@@ -196,6 +196,29 @@ class TaskCardTests(unittest.TestCase):
 
 
 class TaskCardCliTests(unittest.TestCase):
+    def test_structured_task_synthesis_nulls_and_exact_cache_replay(self):
+        from neurolab.document_analysis_cache import run_cached_step
+        from neurolab.task_document_cards import serialize_task_card
+        mod = self.modules["run_gigachat_document_card"]
+        c = card()
+        payload = serialize_task_card(c)
+        for key in ("source_key", "document_id", "document_sha256", "reviewer_status", "card_version"):
+            payload.pop(key)
+        mod._TaskCardResponse.model_validate(payload)
+        with self.assertRaises(ValueError):
+            mod._TaskCardResponse.model_validate({**payload, "reproducibility": 0.9})
+        validate = lambda text: mod._parse_task_card(text, identity=SimpleNamespace(source_key=SOURCE, document_id=DOC),
+                                                    receipt=SimpleNamespace(sha256=c.document_sha256, page_count=1))
+        with tempfile.TemporaryDirectory() as directory:
+            results, attempts = [], []
+            for _ in range(2):
+                meta = {}
+                results.append(run_cached_step(Path(directory), "f" * 64, meta, lambda: json.dumps(payload),
+                                               validate, serialize=serialize_task_card))
+                attempts.append(meta)
+        self.assertEqual([r.card_sha256 for r in results], [c.card_sha256, c.card_sha256])
+        self.assertEqual([a["new_model_calls"] for a in attempts], [1, 0])
+
     def test_new_entrypoint_in_deployed_image_contract(self):
         root = Path(__file__).resolve().parents[1]
         dockerfile = (root / "research/Dockerfile").read_text(encoding="utf-8")
@@ -260,3 +283,26 @@ class TaskCardCliTests(unittest.TestCase):
             receipt = json.loads(output.call_args.args[0])
             self.assertEqual(receipt["task_context"]["mission_id"], "workflow")
             self.assertEqual(receipt["planned_max_model_calls"], 2)
+
+    def test_synthesis_only_missing_cache_stops_before_client(self):
+        mod = self.modules["run_gigachat_document_card"]
+        c = card()
+        identity = SimpleNamespace(source_key=SOURCE, title=TITLE, document_id=DOC, provider="arxiv",
+            document_url="https://export.arxiv.org/pdf/2509.13978v2", license_id="CC-BY-4.0",
+            document_sha256=c.document_sha256, page_count=1)
+        pdf_receipt = SimpleNamespace(sha256=c.document_sha256, page_count=1)
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"DATABASE_URL": "synthetic"}), \
+             patch.object(sys, "argv", ["document", "--source-key", SOURCE, "--document-id", DOC,
+                "--arxiv-id", "2509.13978v2", "--mission", "workflow", "--reuse-windows-only"]), \
+             patch("neurolab.selection_storage.require_metadata_selection", return_value=(selection(),)), \
+             patch.object(mod, "load_document_identity", return_value=identity), \
+             patch.object(mod, "extract_open_access_pdf", return_value=(pdf_receipt, (TEXT,))), \
+             patch.object(mod.GigaChatSettings, "from_environment", return_value=SimpleNamespace(model="GigaChat-2-Pro")), \
+             patch.object(mod, "OUTPUT_PATH", Path(directory) / "latest-document-card.json"), \
+             patch.object(mod, "GigaChatClientFactory") as client:
+            with self.assertRaises(DocumentCardError):
+                mod.main()
+            client.assert_not_called()
+            receipt = json.loads(next(Path(directory).glob("task-document-receipt-*.json")).read_text(encoding="utf-8"))
+            self.assertEqual(receipt["attempts"], [])
+            self.assertEqual(receipt["planned_max_new_model_calls"], 1)

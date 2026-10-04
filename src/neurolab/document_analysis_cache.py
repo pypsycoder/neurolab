@@ -19,7 +19,7 @@ def step_key(*, document_sha256, model_label, prompt):
                              sha256(prompt.encode()).hexdigest()]).encode()).hexdigest()
 
 
-def run_cached_step(directory: Path, key: str, attempt: dict, ask, validate):
+def run_cached_step(directory: Path, key: str, attempt: dict, ask, validate, *, serialize=None):
     """Reserve before SDK invocation; store only strict, bounded parsed output."""
     if len(key) != 64 or any(c not in "0123456789abcdef" for c in key):
         raise ValueError("invalid analysis step key")
@@ -31,12 +31,12 @@ def run_cached_step(directory: Path, key: str, attempt: dict, ask, validate):
     except FileExistsError:
         raise AnalysisOutcomeUnknown("analysis step locked; no automatic replay") from None
     try:
-        return _run_cached_step(directory, key, attempt, ask, validate)
+        return _run_cached_step(directory, key, attempt, ask, validate, serialize=serialize)
     finally:
         lock.unlink()
 
 
-def _run_cached_step(directory: Path, key: str, attempt: dict, ask, validate):
+def _run_cached_step(directory: Path, key: str, attempt: dict, ask, validate, *, serialize=None):
     path = directory / (key + ".json")
     if path.is_symlink():
         raise ValueError("analysis cache symlink forbidden")
@@ -80,8 +80,8 @@ def _run_cached_step(directory: Path, key: str, attempt: dict, ask, validate):
         raw = ask()
         result = validate(raw)
         # Re-serialization contains validated paraphrases only, no raw reply.
-        if hasattr(result, "as_json"):
-            clean = json.loads(result.as_json())
+        if serialize is not None or hasattr(result, "as_json"):
+            clean = serialize(result) if serialize is not None else json.loads(result.as_json())
             # Card metadata is reintroduced from exact host receipt on reload.
             for field in ("source_key", "document_id", "document_sha256", "reviewer_status", "card_version"):
                 clean.pop(field, None)

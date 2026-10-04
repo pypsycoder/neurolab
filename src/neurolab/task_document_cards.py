@@ -50,10 +50,14 @@ def condition_prompt(prompt, mission_id, *, synthesis=False):
 source_independence должны быть null без независимой проверки.
 """
     if synthesis:
-        guidance += """Для каждого findings.summary используй три русские части в таком порядке:
-В статье: конкретное утверждение на указанных страницах.
-Применение: предложенное использование под задачу либо явная неприменимость.
-Пробел: что не раскрыто и нужно проверить.
+        # Новая схема синтеза; ключи окон не меняются, завершённые окна сохраняются.
+        prompt = prompt.replace("page_end, kind, summary; kind", "page_end, kind, source_statement, task_application, missing_details; kind")
+        guidance += """Контракт синтеза task-synthesis-v2. В каждом findings верни три отдельных поля:
+source_statement: конкретное утверждение статьи на указанных страницах.
+task_application: предложенное использование под задачу либо явная неприменимость.
+missing_details: что не раскрыто и нужно проверить.
+Каждое поле — русское предложение от 20 до 400 символов. Поля summary здесь нет.
+reproducibility и source_independence всегда null; это закреплено схемой ответа.
 Не объединяй страницы, чтобы придать гипотезе вид подтверждённого вывода.
 Выводы с применением модели не означают, что статья доказывает это применение.
 """
@@ -101,6 +105,15 @@ def assess_task_numeric_anchors(card, pages):
     source_findings = tuple(replace(f, summary=finding_parts(f.summary)["source_statement"]) for f in card.findings)
     result = assess_numeric_anchors(replace(card, findings=source_findings), pages)
     return {**result, "numeric_scope": "source_statement_only"}
+
+
+def serialize_task_card(card):
+    """Форма кеша совпадает с новой схемой синтеза, не с общим пересказом."""
+    validate_task_card(card)
+    value = json.loads(card.as_json())
+    value["findings"] = [{"page_start": f.page_start, "page_end": f.page_end, "kind": f.kind,
+                          **finding_parts(f.summary)} for f in card.findings]
+    return value
 
 
 def build_semantic_packet(card: DocumentCard, pages, *, mission_id, candidate_model, judge_model):
