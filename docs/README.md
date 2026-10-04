@@ -1,11 +1,17 @@
 # Документация НейроЛаба
 
-- [`architecture/`](architecture/) — границы контуров, роли агентов и traces.
-- [`governance/`](governance/) — управление, риски, политика секретов и [sealed semantic holdout](governance/SEALED_HOLDOUT_PROTOCOL.md).
-- [`deployment/`](deployment/) — Raspberry Pi 5 и план control plane.
+- [`architecture/`](architecture/) — границы контуров, роли агентов и трассировка действий.
+- [`governance/`](governance/) — управление, риски, политика секретов и [закрытый контрольный набор смысловых проверок](governance/SEALED_HOLDOUT_PROTOCOL.md).
+- [`deployment/`](deployment/) — Raspberry Pi 5 и план управляющего контура.
 - [`integrations/`](integrations/) — контракты внешних интеграций.
-- [`research/`](research/) — evidence pipeline и policy публичных источников.
+- [`research/`](research/) — обработка исследовательских материалов и политика публичных источников.
 - [`adr/`](adr/) — принятые архитектурные решения.
 
 Единый план и журнал проекта расположен в корневом
 [`ROADMAP.md`](../ROADMAP.md). Не создавать альтернативные roadmap-файлы.
+
+Все документы и их обновления пишем на русском, включая отчёты, карточки
+исследований и ТЗ, создаваемые моделями. Названия, код и машинные
+идентификаторы сохраняем без перевода. Обязательное правило и исключения
+зафиксированы в разделе «Язык документации — русский» корневого
+[`AGENTS.md`](../AGENTS.md).
