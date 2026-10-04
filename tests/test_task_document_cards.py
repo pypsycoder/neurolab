@@ -196,6 +196,11 @@ class TaskCardTests(unittest.TestCase):
 
 
 class TaskCardCliTests(unittest.TestCase):
+    def test_new_entrypoint_in_deployed_image_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        dockerfile = (root / "research/Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("scripts/prepare_task_card_review.py /app/scripts/prepare_task_card_review.py", dockerfile)
+
     @classmethod
     def setUpClass(cls):
         root = Path(__file__).resolve().parents[1]
