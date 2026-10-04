@@ -29,6 +29,11 @@ from neurolab.document_cards import DocumentCardError
 from neurolab.fulltext_verification import OpenAccessPdfRequest, extract_open_access_pdf, default_pdf_transport
 from neurolab.gigachat import GigaChatClientFactory, GigaChatSettings
 from neurolab.research_storage import load_document_identity, persist_document_card
+from neurolab.task_document_cards import (
+    condition_prompt, require_task_selection, task_context, validate_task_note, validate_task_card,
+)
+from neurolab.task_document_storage import persist_task_card
+from neurolab.research_selection import MISSIONS
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -97,6 +102,8 @@ def main() -> None:
     parser.add_argument("--document-id", required=True)
     parser.add_argument("--arxiv-id", required=True)
     parser.add_argument("--pages-per-window", type=int, default=2)
+    parser.add_argument("--mission", choices=[m.mission_id for m in MISSIONS],
+                        help="Разбор под одну допущенную задачу; отдельная карточка, только сравнительный режим.")
     parser.add_argument("--max-rate-limit-retries", type=int, choices=[0], default=0,
                         help="Retries belong to the two-lane wrapper; no hidden per-window retries.")
     parser.add_argument("--plan-only", action="store_true", help="Extract/plan without credentials or model calls.")
@@ -110,6 +117,9 @@ def main() -> None:
     identity = load_document_identity(
         database_url, source_key=arguments.source_key, document_id=arguments.document_id
     )
+    if arguments.mission:
+        selections = (require_task_selection(selections, mission_id=arguments.mission,
+                         source_key=identity.source_key, title=identity.title),)
     if identity.provider != "arxiv":
         raise RuntimeError("document-card route currently accepts only verified arXiv documents")
     request = OpenAccessPdfRequest(identity.source_key, arguments.arxiv_id, identity.license_id)
@@ -126,6 +136,9 @@ def main() -> None:
              "empty_text_pages": [i for i, text in enumerate(page_texts, 1) if not text.strip()],
              "planned_max_model_calls": len(windows) + 1, "status": "planned", "attempts": [],
              "raw_content_retained": False, "production_deployed": False}
+    if arguments.mission:
+        audit.update(analysis_mode="task_conditioned_shadow", task_context=task_context(arguments.mission),
+                     semantic_verification="not_performed", full_spec_allowed=False)
     if arguments.plan_only:
         print(json.dumps(audit, sort_keys=True))
         return
@@ -138,19 +151,29 @@ def main() -> None:
         audit["attempts"].append(metadata)
         key = step_key(document_sha256=receipt.sha256, model_label=settings.model, prompt=prompt)
         metadata["step_key"] = key
-        return run_cached_step(OUTPUT_PATH.parent / "document-analysis-cache", key, metadata,
+        directory = "task-document-analysis-cache" if arguments.mission else "document-analysis-cache"
+        return run_cached_step(OUTPUT_PATH.parent / directory, key, metadata,
                                lambda: _ask(client, prompt, schema, metadata=metadata), validator)
+    def prompt_for_task(prompt, *, synthesis=False):
+        return condition_prompt(prompt, arguments.mission, synthesis=synthesis) if arguments.mission else prompt
+
+    def parse_note(raw, window):
+        note = parse_window_note(raw, window=window)
+        return validate_task_note(note) if arguments.mission else note
+
+    def parse_card(raw):
+        parsed = parse_document_card(raw, source_key=identity.source_key,
+            document_id=identity.document_id, document_sha256=receipt.sha256, page_count=receipt.page_count)
+        return validate_task_card(parsed) if arguments.mission else parsed
     try:
         # Disable SDK retries, so each audited invocation is one generation attempt.
         factory = GigaChatClientFactory(constructor=lambda **kw: GigaChat(max_retries=0, **kw))
         with factory.create(settings) as client:
-            notes = tuple(step(build_window_prompt(title=identity.title, window=w), _WindowResponse,
-                               lambda raw, w=w: parse_window_note(raw, window=w),
+            notes = tuple(step(prompt_for_task(build_window_prompt(title=identity.title, window=w)), _WindowResponse,
+                               lambda raw, w=w: parse_note(raw, w),
                                kind="window", start=w.page_start, end=w.page_end) for w in windows)
-            card = step(build_card_prompt(title=identity.title, page_count=receipt.page_count, notes=notes),
-                        _CardResponse, lambda raw: parse_document_card(raw, source_key=identity.source_key,
-                            document_id=identity.document_id, document_sha256=receipt.sha256,
-                            page_count=receipt.page_count), kind="synthesis")
+            card = step(prompt_for_task(build_card_prompt(title=identity.title, page_count=receipt.page_count, notes=notes),
+                                        synthesis=True), _CardResponse, parse_card, kind="synthesis")
         # A finding must belong to analysed windows, not just fall within PDF length.
         covered = {p for w in windows for p in range(w.page_start, w.page_end + 1)}
         if any(not set(range(f.page_start, f.page_end + 1)) <= covered for f in card.findings):
@@ -158,16 +181,31 @@ def main() -> None:
         result = {"run_id": run_id, "card": asdict(card), "card_sha256": card.card_sha256,
                   "model_calls": sum(a["new_model_calls"] for a in audit["attempts"]),
                   "page_windows": [{"page_start": w.page_start, "page_end": w.page_end} for w in windows]}
-        if arguments.persist:
-            result["card_id"] = persist_document_card(database_url, card)
-            audit["card_id"] = result["card_id"]
-            utility = [assess_content(card, selected, page_texts) for selected in selections]
-            for selection in utility:
-                persist_selection(database_url, selection)
-            audit["utility_decisions"] = {s.mission_id: s.decision for s in utility}
         audit.update(status="needs_review", card_sha256=card.card_sha256)
+        utility = [assess_content(card, selected, page_texts) for selected in selections]
+        if arguments.mission:
+            audit["legacy_utility_shadow"] = [s.model_dump(mode="json") for s in utility]
+            result["task_context"] = audit["task_context"]
+        if arguments.persist:
+            result["card_id"] = (persist_task_card(database_url, card, selections[0], audit)
+                                 if arguments.mission else persist_document_card(database_url, card))
+            audit["card_id"] = result["card_id"]
+            # Новый режим не меняет прежние решения допуска и пакет ТЗ.
+            if not arguments.mission:
+                for selection in utility:
+                    persist_selection(database_url, selection)
+            audit["utility_decisions"] = {s.mission_id: s.decision for s in utility}
         OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        OUTPUT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        output = OUTPUT_PATH.parent / "latest-task-document-card.json" if arguments.mission else OUTPUT_PATH
+        if output.is_symlink():
+            raise DocumentCardError("document output symlink forbidden")
+        output.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        output.chmod(0o600)
+        if arguments.mission:
+            per_run = output.parent / f"task-document-card-{run_id}.json"
+            with per_run.open("x", encoding="utf-8") as stream:
+                stream.write(json.dumps(result, ensure_ascii=False, sort_keys=True) + "\n")
+            per_run.chmod(0o600)
     except Exception as error:
         # Only definite quota refusals may trigger wrapper failover and reuse.
         # Timeouts/unknown provider execution stay closed, never blind replay.
@@ -176,7 +214,8 @@ def main() -> None:
         raise
     finally:
         OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        path = OUTPUT_PATH.parent / f"document-receipt-{run_id}.json"
+        prefix = "task-document-receipt" if arguments.mission else "document-receipt"
+        path = OUTPUT_PATH.parent / f"{prefix}-{run_id}.json"
         path.write_text(json.dumps(audit, sort_keys=True) + "\n", encoding="utf-8")
         path.chmod(0o600)
     print(f"document_card: needs_review; run_id={run_id}; windows={len(windows)}; new_model_calls={result['model_calls']}")
